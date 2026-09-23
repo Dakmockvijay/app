@@ -1,0 +1,189 @@
+{
+  "app_name": "DakMock",
+  "personality": "1 iOS-Native Clean",
+  "personality_one_liner": "A clean, highly legible, and structured learning environment that feels both officially sanctioned and effortlessly modern.",
+  "color": {
+    "surface": "#FFFFFF",
+    "onSurface": "#0A1128",
+    "surfaceSecondary": "#F8F9FA",
+    "onSurfaceSecondary": "#1A202C",
+    "surfaceTertiary": "#E2E8F0",
+    "onSurfaceTertiary": "#2D3748",
+    "surfaceInverse": "#002147",
+    "onSurfaceInverse": "#FFFFFF",
+    "brand": "#C8102E",
+    "brandPrimary": "#C8102E",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#FFC72C",
+    "onBrandSecondary": "#002147",
+    "brandTertiary": "#002147",
+    "onBrandTertiary": "#FFFFFF",
+    "success": "#059669",
+    "onSuccess": "#FFFFFF",
+    "warning": "#D97706",
+    "onWarning": "#FFFFFF",
+    "error": "#DC2626",
+    "onError": "#FFFFFF",
+    "info": "#0284C7",
+    "onInfo": "#FFFFFF",
+    "border": "#E2E8F0",
+    "borderStrong": "#CBD5E1",
+    "divider": "#F1F5F9",
+    "muted": "#64748B"
+  },
+  "typography": {
+    "displayFontFamily": "Plus Jakarta Sans",
+    "textFontFamily": "Geist",
+    "monoFontFamily": "Space Grotesk",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous iOS-native padding. No cramped cards. Distinct structural margins with bottom safe area clearance.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": "1",
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": true,
+    "do's": [
+      "Bottom tab bar",
+      "Sticky bottom CTA container in Mock Test",
+      "Header background when content scrolls behind"
+    ],
+    "dont's": [
+      "Dense question lists",
+      "Overusing on cards",
+      "Exam Palette overlay if it affects legibility"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Auth",
+      "purpose": "Secure entry point for postal employees with email or Google.",
+      "states": {
+        "loading": "Spinner over white screen.",
+        "empty": "N/A",
+        "error": "Standard error toast/snackbar."
+      },
+      "layout": "Hero image at the top spanning 40% height. Clean white card spanning bottom 60% with inputs, solid brandPrimary CTA. Safe area respected."
+    },
+    {
+      "name": "Student Dashboard (Home)",
+      "purpose": "Central hub showing active validity, purchased tests, and new test recommendations.",
+      "states": {
+        "loading": "Skeleton cards.",
+        "empty": "Illustration of studying with 'Explore Exam Passes' CTA.",
+        "error": "Error fetching data with a retry button."
+      },
+      "layout": "Top portion features a Deep Navy (brandTertiary) header with white greeting and active pass validity. Below this: Horizontal scrolling row for 'My Mock Tests' (surfaceSecondary cards with progress bars). Vertical list for 'Recommended Passes' (Combo vs Single). Bottom Tab Bar."
+    },
+    {
+      "name": "Live Mock Test Interface",
+      "purpose": "Simulated exam environment with timer, bilingual options, and question palette.",
+      "states": {
+        "loading": "Loading exam JSON...",
+        "empty": "N/A",
+        "error": "Could not load test."
+      },
+      "layout": "Header: Timer (mono font) and Submit/Pause icons. Sub-header: Subject tabs (e.g., Math, GK) and EN/HI language toggle. Main Body: Scrollable question card + options. Sticky Bottom Container (Glass): 'Mark for Review', 'Clear', 'Save & Next'. A Floating Action Button (FAB) or Header icon opens the 'Question Palette' Bottom Sheet (grid of question numbers colored by status: Green=Answered, Gray=Unanswered, Navy=Review)."
+    },
+    {
+      "name": "Score Analysis & Leaderboard",
+      "purpose": "Post-exam breakdown of performance and ranking.",
+      "states": {
+        "loading": "Calculating score...",
+        "empty": "No previous tests.",
+        "error": "Error loading results."
+      },
+      "layout": "Hero card at top showing absolute score and percentile ring chart. Segmented control below: 'Analysis', 'Leaderboard', 'Explanations'. Analysis shows accuracy stats. Leaderboard shows a vertical list of top users. Explanations shows a scrollable list of questions with correct answers highlighted in success color."
+    },
+    {
+      "name": "Wallet & Referral",
+      "purpose": "Dashboard for token balance and payouts.",
+      "states": {
+        "loading": "Fetching balance...",
+        "empty": "Illustration of empty wallet, prompt to share code.",
+        "error": "Error loading wallet."
+      },
+      "layout": "Large brandTertiary banner card displaying token balance. A pronounced CTA to 'Claim Payout' (only active if tokens >= 10). Below, a section displaying the unique referral code with a 'Share' icon. Bottom section is a transaction history list."
+    },
+    {
+      "name": "Admin Panel",
+      "purpose": "In-app control center for management and test uploads.",
+      "states": {
+        "loading": "Loading stats...",
+        "empty": "No pending tasks.",
+        "error": "Not authorized."
+      },
+      "layout": "Restricted access. Grid of utility tiles: User Management, Bulk XLSX Upload, Pricing Config, Payout Requests. Uses standard list layouts inside each module."
+    }
+  ],
+  "images": {
+    "auth_hero": {
+      "url": "https://images.unsplash.com/photo-1554672408-17407e0322ce?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NjZ8MHwxfHNlYXJjaHwxfHxzdHVkZW50JTIwdGFraW5nJTIwb25saW5lJTIwZXhhbSUyMG9uJTIwbW9iaWxlJTIwcGhvbmV8ZW58MHx8fHwxNzkwMTcxNDc3fDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Student taking online exam on mobile phone"
+    },
+    "wallet_empty": {
+      "url": "https://images.pexels.com/photos/8515596/pexels-photo-8515596.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "alt": "Empty wallet highlighting zero balance"
+    },
+    "onboarding_postbox": {
+      "url": "https://images.unsplash.com/photo-1748342843589-338edf0497c1?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNzl8MHwxfHNlYXJjaHwxfHxJbmRpYSUyMFBvc3QlMjBwb3N0Ym94fGVufDB8fHx8MTc5MDE3MTQ2Nnww&ixlib=rb-4.1.0&q=85",
+      "alt": "India Post red postbox"
+    },
+    "dashboard_empty": {
+      "url": "https://images.pexels.com/photos/8423372/pexels-photo-8423372.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "alt": "Student studying books flat lay"
+    }
+  },
+  "haptics": {
+    "events": {
+      "submit_test": "notification_success",
+      "save_and_next": "impact_light",
+      "mark_for_review": "impact_medium",
+      "tab_change": "selection",
+      "claim_payout": "notification_success",
+      "language_toggle": "selection"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Follow the '1 iOS-Native Clean' personality rigorously. Maintain generous padding and use Plus Jakarta Sans + Geist pairings.",
+    "Leverage the specific brand colors defined: Department of Post Red (#C8102E) for primary actions, Deep Navy (#002147) for headers and high-contrast hero areas, and Postal Yellow (#FFC72C) for accents/warnings. The Navy is explicitly allowed per the prompt brief.",
+    "Implement the live mock test interface meticulously: ensure the timer uses a mono font (Space Grotesk), implement the question palette via @gorhom/bottom-sheet, and make the 'Save & Next' CTA a sticky floating container with an expo-glass-effect background.",
+    "For the Question Palette grid: use standard colors (Green for Answered, Gray for Unanswered, Deep Navy for Marked for Review). DO NOT USE PURPLE OR INDIGO.",
+    "Implement bilingual toggling (EN/HI) smoothly in the test interface header, ensure UI components gracefully handle variable string lengths.",
+    "Ensure all images mapped in the JSON use the gradient-to-dark scrim pattern if text overlays them, as described in the instructions.",
+    "Apply Safe Area contexts to all screens properly, especially on the live exam UI where bottom sticky actions shouldn't clash with the home indicator."
+  ]
+}
