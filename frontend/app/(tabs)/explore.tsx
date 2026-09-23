@@ -6,7 +6,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CaretRight, Lock, LockOpen, X, CheckCircle } from "phosphor-react-native";
 
 import { api } from "@/src/api";
-import { purchase } from "@/src/payments";
+import { createOrder, verifyPayment, invalidatePurchaseQueries, PaymentOrder, Plan } from "@/src/payments";
+import { RazorpayCheckout } from "@/src/components/razorpay-checkout";
+import { useAuth } from "@/src/auth";
 import { usesNativeTabs } from "@/src/navigation";
 import { useToast } from "@/src/toast";
 import { AppButton, Card, Loading, Badge } from "@/src/components/ui";
@@ -18,12 +20,15 @@ export default function Explore() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const toast = useToast();
+  const { user } = useAuth();
   const params = useLocalSearchParams<{ category?: string }>();
   const bottomChrome = usesNativeTabs ? insets.bottom : 0;
 
   const [selected, setSelected] = useState<string>(params.category || "all");
   const [modalCat, setModalCat] = useState<{ id: string; name: string } | null>(null);
   const [busyPlan, setBusyPlan] = useState<string | null>(null);
+  const [liveOrder, setLiveOrder] = useState<PaymentOrder | null>(null);
+  const [livePlan, setLivePlan] = useState<Plan>("combo");
 
   const cats = useQuery({ queryKey: ["categories"], queryFn: () => api.get("/categories") });
   const series = useQuery({ queryKey: ["test-series"], queryFn: () => api.get("/test-series") });
@@ -37,13 +42,26 @@ export default function Explore() {
 
   const chips = [{ category_id: "all", short: "All", name: "All Exams" }, ...(cats.data || [])];
 
-  const doPurchase = async (plan: "single" | "combo", categoryId?: string) => {
+  const purchaseSuccess = (plan: Plan) => {
+    setModalCat(null);
+    toast.show(plan === "combo" ? "Combo Pass activated! 🎉" : "Pass activated! 🎉", "success");
+    series.refetch();
+  };
+
+  const doPurchase = async (plan: Plan, categoryId?: string) => {
     setBusyPlan(plan);
     try {
-      await purchase(plan, categoryId);
-      setModalCat(null);
-      toast.show(plan === "combo" ? "Combo Pass activated! 🎉" : "Pass activated! 🎉", "success");
-      series.refetch();
+      const order = await createOrder(plan, categoryId);
+      if (order.mock) {
+        await verifyPayment({ localOrderId: order.local_order_id });
+        await invalidatePurchaseQueries();
+        purchaseSuccess(plan);
+      } else {
+        // Live keys configured: open Razorpay Standard Checkout.
+        setModalCat(null);
+        setLivePlan(plan);
+        setLiveOrder(order);
+      }
     } catch (e: any) {
       toast.show(e.message || "Payment failed", "error");
     } finally {
@@ -185,6 +203,23 @@ export default function Explore() {
           </View>
         </View>
       </Modal>
+
+      {liveOrder && (
+        <RazorpayCheckout
+          order={liveOrder}
+          description={livePlan === "combo" ? "DakMock Combo Pass" : "DakMock Single Category Pass"}
+          prefill={{ name: user?.name, email: user?.email }}
+          onSuccess={async () => {
+            setLiveOrder(null);
+            await invalidatePurchaseQueries();
+            purchaseSuccess(livePlan);
+          }}
+          onCancel={(reason) => {
+            setLiveOrder(null);
+            toast.show(reason || "Payment cancelled", reason ? "error" : "info");
+          }}
+        />
+      )}
     </View>
   );
 }
