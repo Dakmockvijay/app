@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 2 (admin management + announcement popup + paper grouping) tested end-to-end. Backend: 6/6 pytest cases pass in /app/backend/tests/test_admin_management.py covering (1) admin test-series CRUD with student-side reflection on GET /test-series, (2) admin tests CRUD with bilingual questions + paper label + duration, admin GET /admin/tests/{tid} returns correct_index while student GET /tests/{tid} does NOT leak correct_index, student /test-series/{sid}/tests surfaces the 'paper' field, (3) announcements admin CRUD + student GET /announcements/active reflects active toggle, (4) admin user detail/update (is_admin & token_balance), grant combo & single-category subscriptions (immediately grants access on student /test-series), revoke, (5) referral-config PUT changes GET /admin/settings and payment/verify respects referral_enabled + tokens_per_referral (A gained +3 tokens on B's purchase, 0 additional tokens on C's purchase when disabled), (6) RBAC: non-admin gets 403 on all new admin endpoints. Frontend (mobile 390x844): admin login works, Home shows announcement popup ('Welcome!' Got it) that DOES NOT reappear after refresh (persisted dismiss), Profile→Admin Panel shows all 8 tiles including new admin-tile-series/announcements/referral. Admin Series screen: create new series via new-series-btn + save-series works (list refreshes). Admin Announcements: new-ann-btn + save-ann creates active announcement that surfaces as popup elsewhere via react-query polling. Admin Referral screen: per-ref field editable and save-referral persists (verified via GET /admin/settings in backend). Admin Test-editor (add-test-btn from series detail): filled title, duration=20, paper='Paper 3', added one bilingual question, tapped correct-0-1, save-test succeeded and the new test appears in Manage Tests with 'Paper 3' badge and 1 Q. Two pre-existing RN Web deprecation warnings persist (unchanged from iter 1).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "RN Web deprecation", "issue": "'props.pointerEvents is deprecated. Use style.pointerEvents' still emitted at load. Search components using pointerEvents prop and move it into style prop."},
+      {"component": "RN Web deprecation", "issue": "'shadow* style props are deprecated. Use boxShadow.' Replace shadow* in StyleSheet with boxShadow."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_admin_management.py",
+    "/app/test_reports/pytest/pytest_admin_mgmt.xml"
+  ],
+  "action_items": [
+    "(Carry-over) Address RN Web deprecation warnings (pointerEvents to style; shadow* to boxShadow). Cosmetic only.",
+    "Nice-to-have: add data-testid='paper-header-<n>' on the student series screen paper headers to make future automation easier."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now ~1289 lines. Consider splitting into modules (auth, catalog, admin_series, admin_users, announcements, referrals, payments, seed) — the file continues to grow and mixes concerns.",
+    "admin_revoke_sub accepts subscription_id as a query param and revokes ALL active subs when omitted — this is powerful; consider requiring subscription_id or making the 'revoke all' case explicit to avoid accidental mass revoke.",
+    "SeriesUpdateIn.category_id is optional (good) but there is no validation that the category exists on update; consider verifying like admin_create_test does for series_id.",
+    "Announcement PUT (admin_update_announcement) reuses AnnouncementIn (all-required) rather than a partial model — API works but every edit forces sending title+message+active."
+  ],
+  "updated_files": ["/app/backend/tests/test_admin_management.py", "/app/test_reports/iteration_2.json", "/app/test_reports/pytest/pytest_admin_mgmt.xml"],
+  "success_rate": {"backend": "100% (6/6 new + earlier 17/17 unchanged)", "frontend": "100% of tested flows (admin login, popup, series CRUD, announcement CRUD, referral save, test-editor with paper)"},
+  "seed_data_creation": "Tests create disposable TEST_ users; created (and left) one 'UI Test <ts>' series, one 'UI Test Ann' announcement, one 'UI Test Paper 3' test under GDS-to-MTS Free Practice for main-agent visual verification. Referral config was reset back to defaults (enabled=true, tokens_per_referral=1).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "New pytest file at /app/backend/tests/test_admin_management.py exercises: admin CRUD for /api/admin/test-series and /api/admin/tests (incl. paper label + bilingual + correct_index round-trip and student-side non-leak), announcements admin CRUD + GET /api/announcements/active, /api/admin/users/{uid} detail/update/grant-subscription/revoke-subscription, PUT /api/admin/referral-config with reward-on-verify assertion (enabled vs disabled). Frontend testIDs added this iteration: admin-tile-{series,announcements,referral}, new-series-btn, series-title/desc/toggle-free, cat-<category_id>, save-series, edit-series-<id>, del-series-<id>, add-test-btn (on series/[id].tsx), test-title/duration/paper, q-en-<i>/q-hi-<i>/opt-en-<i>-<j>/opt-hi-<i>-<j>/correct-<i>-<j>/exp-en-<i>/exp-hi-<i>/marks-<i>/add-question/save-test, new-ann-btn/ann-title/ann-message/ann-active/save-ann/toggle-ann-<id>/edit-ann-<id>/del-ann-<id>, ref-enabled/per-ref/token-value/threshold/save-referral. Announcement popup on Home uses AsyncStorage-style persistence (dismiss survives refresh — confirmed).",
+  "rca_of_issue": "N/A — no functional issues found this iteration."
+}

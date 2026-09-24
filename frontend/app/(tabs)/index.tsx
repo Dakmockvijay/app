@@ -1,11 +1,12 @@
-import React from "react";
-import { ScrollView, Text, View, Pressable, RefreshControl } from "react-native";
+import React, { useEffect, useState } from "react";
+import { ScrollView, Text, View, Pressable, RefreshControl, Modal } from "react-native";
 import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { CaretRight, Clock, Trophy, Fire } from "phosphor-react-native";
+import { CaretRight, Clock, Trophy, Fire, Megaphone, X } from "phosphor-react-native";
 
 import { api } from "@/src/api";
+import { storage } from "@/src/utils/storage";
 import { useAuth } from "@/src/auth";
 import { usesNativeTabs } from "@/src/navigation";
 import { Card, Loading, Badge } from "@/src/components/ui";
@@ -24,10 +25,27 @@ export default function Home() {
   const { user } = useAuth();
   const bottomChrome = usesNativeTabs ? insets.bottom : 0;
 
-  const subs = useQuery({ queryKey: ["subscriptions"], queryFn: () => api.get("/subscriptions") });
+  const subs = useQuery({ queryKey: ["subscriptions"], queryFn: () => api.get("/subscriptions"), refetchInterval: 10000 });
   const cats = useQuery({ queryKey: ["categories"], queryFn: () => api.get("/categories") });
-  const series = useQuery({ queryKey: ["test-series"], queryFn: () => api.get("/test-series") });
-  const attempts = useQuery({ queryKey: ["attempts"], queryFn: () => api.get("/attempts") });
+  const series = useQuery({ queryKey: ["test-series"], queryFn: () => api.get("/test-series"), refetchInterval: 10000 });
+  const attempts = useQuery({ queryKey: ["attempts"], queryFn: () => api.get("/attempts"), refetchInterval: 15000 });
+  const announcement = useQuery({ queryKey: ["announcement"], queryFn: () => api.get("/announcements/active"), refetchInterval: 20000 });
+
+  const [showAnn, setShowAnn] = useState(false);
+
+  useEffect(() => {
+    const a = announcement.data;
+    if (!a) return;
+    (async () => {
+      const seen = await storage.getItem<string | null>("dakmock_seen_announcement", null);
+      if (seen !== a.announcement_id) setShowAnn(true);
+    })();
+  }, [announcement.data]);
+
+  const dismissAnn = async () => {
+    if (announcement.data) await storage.setItem("dakmock_seen_announcement", announcement.data.announcement_id);
+    setShowAnn(false);
+  };
 
   const loading = subs.isLoading || cats.isLoading || series.isLoading;
   const refreshing = subs.isFetching && !subs.isLoading;
@@ -159,6 +177,24 @@ export default function Home() {
           </Pressable>
         </View>
       </ScrollView>
+
+      <Modal visible={showAnn} transparent animationType="fade" onRequestClose={dismissAnn}>
+        <View style={styles.annOverlay}>
+          <View style={styles.annCard}>
+            <View style={styles.annIcon}>
+              <Megaphone size={30} color={colors.onBrandPrimary} weight="fill" />
+            </View>
+            <Pressable testID="close-announcement" onPress={dismissAnn} style={styles.annClose} hitSlop={12}>
+              <X size={22} color={colors.muted} />
+            </Pressable>
+            <Text style={styles.annTitle}>{announcement.data?.title}</Text>
+            <Text style={styles.annMsg}>{announcement.data?.message}</Text>
+            <Pressable testID="got-it-announcement" onPress={dismissAnn} style={styles.annBtn}>
+              <Text style={styles.annBtnText}>Got it</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -233,4 +269,12 @@ const useStyles = makeStyles((colors) => ({
     marginTop: spacing.sm,
   },
   seeAllText: { color: colors.brandPrimary, fontSize: fontSize.base, fontWeight: "800" },
+  annOverlay: { flex: 1, backgroundColor: "rgba(10,17,40,0.6)", alignItems: "center", justifyContent: "center", padding: spacing.xl },
+  annCard: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.xl, width: "100%", maxWidth: 420, alignItems: "center", gap: spacing.sm },
+  annIcon: { width: 60, height: 60, borderRadius: 30, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center", marginBottom: spacing.xs },
+  annClose: { position: "absolute", top: spacing.md, right: spacing.md },
+  annTitle: { fontSize: fontSize.xl, fontWeight: "900", color: colors.onSurface, textAlign: "center" },
+  annMsg: { fontSize: fontSize.base, color: colors.onSurfaceSecondary, textAlign: "center", lineHeight: 22 },
+  annBtn: { marginTop: spacing.md, alignSelf: "stretch", backgroundColor: colors.brandPrimary, paddingVertical: spacing.md, borderRadius: radius.md, alignItems: "center" },
+  annBtnText: { color: colors.onBrandPrimary, fontWeight: "800", fontSize: fontSize.base },
 }));

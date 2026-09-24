@@ -1,7 +1,9 @@
 import React from "react";
-import { FlatList, Text, View } from "react-native";
+import { FlatList, Pressable, Text, View } from "react-native";
+import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { CaretRight } from "phosphor-react-native";
 
 import { api } from "@/src/api";
 import { ScreenHeader } from "@/src/components/screen-header";
@@ -12,6 +14,7 @@ export default function AdminUsers() {
   const styles = useStyles();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const users = useQuery({ queryKey: ["admin-users"], queryFn: () => api.get("/admin/users") });
 
   return (
@@ -26,21 +29,24 @@ export default function AdminUsers() {
           contentContainerStyle={{ padding: spacing.xl, paddingBottom: insets.bottom + spacing.xl, gap: spacing.md }}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
-            <Card style={styles.card}>
-              <View style={styles.rowTop}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.name}>{item.name}</Text>
-                  <Text style={styles.email}>{item.email}</Text>
+            <Pressable testID={`user-${item.user_id}`} onPress={() => router.push(`/admin/user/${item.user_id}`)}>
+              <Card style={styles.card}>
+                <View style={styles.rowTop}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.name}>{item.name}</Text>
+                    <Text style={styles.email}>{item.email}</Text>
+                  </View>
+                  {item.is_admin && <Badge label="ADMIN" color={colors.onBrandSecondary} bg={colors.brandSecondary} />}
+                  <CaretRight size={18} color={colors.muted} />
                 </View>
-                {item.is_admin && <Badge label="ADMIN" color={colors.onBrandSecondary} bg={colors.brandSecondary} />}
-              </View>
-              <View style={styles.metaRow}>
-                <Meta label="Code" value={item.referral_code} />
-                <Meta label="Tokens" value={String(item.token_balance)} />
-                <Meta label="Subs" value={String(item.active_subscriptions)} />
-                <Meta label="Tests" value={String(item.attempts)} />
-              </View>
-            </Card>
+                <View style={styles.metaRow}>
+                  <Meta label="Code" value={item.referral_code} />
+                  <Meta label="Tokens" value={String(item.token_balance)} />
+                  <Meta label="Subs" value={String(item.active_subscriptions)} />
+                  <Meta label="Tests" value={String(item.attempts)} />
+                </View>
+              </Card>
+            </Pressable>
           )}
         />
       )}

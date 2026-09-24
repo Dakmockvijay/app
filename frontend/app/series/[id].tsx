@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { FlatList, Pressable, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
@@ -19,7 +19,26 @@ export default function SeriesDetail() {
   const q = useQuery({
     queryKey: ["series-tests", id],
     queryFn: () => api.get(`/test-series/${id}/tests`),
+    refetchInterval: 10000,
   });
+
+  const rows = useMemo(() => {
+    const tests: any[] = q.data?.tests || [];
+    const papers: string[] = [];
+    const map: Record<string, any[]> = {};
+    tests.forEach((t) => {
+      const p = t.paper || "";
+      if (!map[p]) { map[p] = []; papers.push(p); }
+      map[p].push(t);
+    });
+    const hasPapers = papers.some((p) => p);
+    const out: any[] = [];
+    papers.forEach((p) => {
+      if (hasPapers) out.push({ __header: p || "Other" });
+      map[p].forEach((t) => out.push(t));
+    });
+    return out;
+  }, [q.data]);
 
   if (q.isLoading) return <Loading label="Loading tests…" />;
   const series = q.data?.series;
@@ -38,11 +57,15 @@ export default function SeriesDetail() {
       </View>
 
       <FlatList
-        data={tests}
-        keyExtractor={(t) => t.test_id}
+        data={rows}
+        keyExtractor={(item) => (item.__header ? `h-${item.__header}` : item.test_id)}
         contentContainerStyle={{ padding: spacing.xl, paddingBottom: insets.bottom + spacing.xl, gap: spacing.md }}
         showsVerticalScrollIndicator={false}
-        renderItem={({ item }) => (
+        renderItem={({ item }) => {
+          if (item.__header) {
+            return <Text style={styles.paperHeader}>{item.__header}</Text>;
+          }
+          return (
           <Card>
             <Text style={styles.testTitle}>{item.title}</Text>
             <View style={styles.metaRow}>
@@ -88,7 +111,8 @@ export default function SeriesDetail() {
               )}
             </View>
           </Card>
-        )}
+          );
+        }}
       />
     </View>
   );
@@ -108,6 +132,7 @@ const useStyles = makeStyles((colors) => ({
   headerTitle: { color: "#FFFFFF", fontSize: fontSize.xl, fontWeight: "900" },
   headerSub: { color: colors.brandSecondary, fontSize: fontSize.base, fontWeight: "700", marginTop: 2 },
   testTitle: { fontSize: fontSize.lg, fontWeight: "800", color: colors.onSurface },
+  paperHeader: { fontSize: fontSize.lg, fontWeight: "900", color: colors.brandTertiary, marginTop: spacing.sm },
   metaRow: { flexDirection: "row", gap: spacing.lg, marginTop: spacing.sm, marginBottom: spacing.md },
   metaItem: { flexDirection: "row", alignItems: "center", gap: 4 },
   metaText: { fontSize: fontSize.sm, color: colors.muted, fontWeight: "600" },

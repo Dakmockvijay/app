@@ -22,7 +22,17 @@ Production-ready India Post (Department of Posts) departmental competitive exam 
 - Referral: unique code, 1 token per referred first-purchase, 1 token = ₹10, payout at ≥10 tokens via UPI/Paytm/GPay.
 - Admin: users, bulk .xlsx upload + template, dynamic pricing/Razorpay creds, support email config, payout approve/reject, tickets.
 
-## Implemented (2026-06)
+## Implemented (2026-06) — v1.1 Admin Management update
+- ✅ Admin: full Test Series manager (create / edit / mark free-paid / soft-delete).
+- ✅ Admin: in-app Test & Question editor (bilingual EN/HI, per-question correct answer, marks, duration, optional **Paper 1 / Paper 2** label) — create, edit, delete.
+- ✅ Admin: Announcements manager → shows as a one-time popup on student Home (dismiss persists).
+- ✅ Admin: Single-user management (grant/revoke subscription, adjust tokens, promote to admin).
+- ✅ Admin: Referral settings (enable/disable system, tokens per referral, token value, payout threshold) — enforced in payment verification.
+- ✅ Student real-time: react-query polling (~10s) so admin changes appear without app restart; series detail groups tests by Paper.
+- ✅ Razorpay Standard Checkout wired (WebView, works in Expo Go + production) — activates when admin enables live keys; mock mode otherwise.
+- ✅ Backend + frontend E2E tested (admin CRUD, RBAC 403s, announcements, referral reward) — all passed.
+
+## Implemented (2026-06) — v1.0
 - ✅ Full auth (email/password + Emergent Google), gate + session handling.
 - ✅ Student dashboard, explore/tests with category filter chips, plan purchase modal (mock payment).
 - ✅ Live bilingual exam interface with palette bottom sheet, timer auto-submit, haptics.

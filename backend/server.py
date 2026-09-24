@@ -133,6 +133,52 @@ class TestIn(BaseModel):
     questions: List[QuestionIn] = []
 
 
+class AnnouncementIn(BaseModel):
+    title: str
+    message: str
+    active: bool = True
+
+
+class SeriesUpdateIn(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    is_free: Optional[bool] = None
+    category_id: Optional[str] = None
+
+
+class AdminTestIn(BaseModel):
+    series_id: str
+    title: str
+    duration_min: int = 30
+    paper: str = ""
+    questions: List[QuestionIn] = []
+
+
+class AdminTestUpdateIn(BaseModel):
+    title: Optional[str] = None
+    duration_min: Optional[int] = None
+    paper: Optional[str] = None
+    questions: Optional[List[QuestionIn]] = None
+
+
+class GrantSubIn(BaseModel):
+    plan: str  # single | combo
+    category_id: Optional[str] = None
+    days: int = 365
+
+
+class UserUpdateIn(BaseModel):
+    is_admin: Optional[bool] = None
+    token_balance: Optional[int] = None
+
+
+class ReferralConfigIn(BaseModel):
+    referral_enabled: bool
+    tokens_per_referral: int
+    token_value: int
+    payout_threshold: int
+
+
 # ----------------------------- Helpers ---------------------------------------
 def hash_pw(pw: str) -> str:
     return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
@@ -208,8 +254,12 @@ async def get_settings() -> Dict[str, Any]:
             "razorpay": {"enabled": False, "key_id": "", "key_secret": "", "mode": "test"},
             "token_value": 10,
             "payout_threshold": 10,
+            "referral_enabled": True,
+            "tokens_per_referral": 1,
         }
         await db.settings.insert_one(s)
+    s.setdefault("referral_enabled", True)
+    s.setdefault("tokens_per_referral", 1)
     return s
 
 
@@ -360,6 +410,7 @@ async def series_tests(series_id: str, user: Dict[str, Any] = Depends(get_curren
             "test_id": t["test_id"],
             "title": t["title"],
             "duration_min": t["duration_min"],
+            "paper": t.get("paper", ""),
             "question_count": len(t.get("questions", [])),
             "total_marks": sum(q.get("marks", 1) for q in t.get("questions", [])),
             "attempted": attempt is not None,
@@ -629,14 +680,16 @@ async def verify_payment(body: VerifyIn, user: Dict[str, Any] = Depends(get_curr
     buyer = await db.users.find_one({"user_id": order["user_id"]})
     if buyer and not buyer.get("has_purchased"):
         await db.users.update_one({"user_id": buyer["user_id"]}, {"$set": {"has_purchased": True}})
-        if buyer.get("referred_by"):
-            await db.users.update_one({"user_id": buyer["referred_by"]}, {"$inc": {"token_balance": 1}})
+        settings = await get_settings()
+        if buyer.get("referred_by") and settings.get("referral_enabled", True):
+            tokens = int(settings.get("tokens_per_referral", 1))
+            await db.users.update_one({"user_id": buyer["referred_by"]}, {"$inc": {"token_balance": tokens}})
             await db.referrals.insert_one({
                 "referral_id": f"ref_{uuid.uuid4().hex[:12]}",
                 "referrer_id": buyer["referred_by"],
                 "referred_id": buyer["user_id"],
                 "referred_name": buyer.get("name", ""),
-                "tokens_awarded": 1,
+                "tokens_awarded": tokens,
                 "created_at": now(),
             })
     return {"ok": True, "status": "paid"}
@@ -777,6 +830,10 @@ async def admin_get_settings(_: Dict[str, Any] = Depends(require_admin)):
         "single_price": s["single_price"],
         "combo_price": s["combo_price"],
         "support_email": s.get("support_email", ""),
+        "referral_enabled": s.get("referral_enabled", True),
+        "tokens_per_referral": s.get("tokens_per_referral", 1),
+        "token_value": s.get("token_value", 10),
+        "payout_threshold": s.get("payout_threshold", 10),
         "razorpay": {
             "enabled": rz.get("enabled", False),
             "key_id": rz.get("key_id", ""),
@@ -920,6 +977,207 @@ async def bulk_upload(file: UploadFile = File(...), _: Dict[str, Any] = Depends(
         created_tests += 1
         created_questions += len(g["questions"])
     return {"ok": True, "tests_created": created_tests, "questions_created": created_questions}
+
+
+# ----------------------------- Announcements --------------------------------
+@api.get("/announcements/active")
+async def active_announcement(_: Dict[str, Any] = Depends(get_current_user)):
+    a = await db.announcements.find_one(
+        {"active": True, "deleted_at": None}, {"_id": 0}, sort=[("created_at", -1)]
+    )
+    if not a:
+        return None
+    return {"announcement_id": a["announcement_id"], "title": a["title"],
+            "message": a["message"], "created_at": iso(a["created_at"])}
+
+
+@api.get("/admin/announcements")
+async def admin_list_announcements(_: Dict[str, Any] = Depends(require_admin)):
+    items = await db.announcements.find({"deleted_at": None}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return [{**a, "created_at": iso(a["created_at"])} for a in items]
+
+
+@api.post("/admin/announcements")
+async def admin_create_announcement(body: AnnouncementIn, _: Dict[str, Any] = Depends(require_admin)):
+    aid = f"ann_{uuid.uuid4().hex[:10]}"
+    await db.announcements.insert_one({
+        "announcement_id": aid, "title": body.title, "message": body.message,
+        "active": body.active, "deleted_at": None, "created_at": now(),
+    })
+    return {"ok": True, "announcement_id": aid}
+
+
+@api.put("/admin/announcements/{aid}")
+async def admin_update_announcement(aid: str, body: AnnouncementIn, _: Dict[str, Any] = Depends(require_admin)):
+    await db.announcements.update_one(
+        {"announcement_id": aid},
+        {"$set": {"title": body.title, "message": body.message, "active": body.active}},
+    )
+    return {"ok": True}
+
+
+@api.delete("/admin/announcements/{aid}")
+async def admin_delete_announcement(aid: str, _: Dict[str, Any] = Depends(require_admin)):
+    await db.announcements.update_one({"announcement_id": aid}, {"$set": {"deleted_at": now()}})
+    return {"ok": True}
+
+
+# ----------------------------- Admin: Series & Tests ------------------------
+@api.get("/admin/test-series")
+async def admin_list_series(_: Dict[str, Any] = Depends(require_admin)):
+    series = await db.test_series.find({"deleted_at": None}, {"_id": 0}).to_list(500)
+    out = []
+    for s in series:
+        cnt = await db.tests.count_documents({"series_id": s["series_id"], "deleted_at": None})
+        cat = await db.categories.find_one({"category_id": s["category_id"]}, {"_id": 0})
+        out.append({
+            "series_id": s["series_id"], "title": s["title"], "description": s.get("description", ""),
+            "category_id": s["category_id"], "category_name": cat["name"] if cat else s["category_id"],
+            "is_free": s.get("is_free", False), "test_count": cnt,
+        })
+    return out
+
+
+@api.put("/admin/test-series/{sid}")
+async def admin_update_series(sid: str, body: SeriesUpdateIn, _: Dict[str, Any] = Depends(require_admin)):
+    update = {k: v for k, v in body.dict().items() if v is not None}
+    if update:
+        await db.test_series.update_one({"series_id": sid}, {"$set": update})
+    return {"ok": True}
+
+
+@api.delete("/admin/test-series/{sid}")
+async def admin_delete_series(sid: str, _: Dict[str, Any] = Depends(require_admin)):
+    await db.test_series.update_one({"series_id": sid}, {"$set": {"deleted_at": now()}})
+    await db.tests.update_many({"series_id": sid}, {"$set": {"deleted_at": now()}})
+    return {"ok": True}
+
+
+@api.get("/admin/test-series/{sid}/tests")
+async def admin_series_tests(sid: str, _: Dict[str, Any] = Depends(require_admin)):
+    tests = await db.tests.find({"series_id": sid, "deleted_at": None}, {"_id": 0}).to_list(500)
+    return [{
+        "test_id": t["test_id"], "title": t["title"], "duration_min": t["duration_min"],
+        "paper": t.get("paper", ""), "question_count": len(t.get("questions", [])),
+    } for t in tests]
+
+
+@api.get("/admin/tests/{tid}")
+async def admin_get_test(tid: str, _: Dict[str, Any] = Depends(require_admin)):
+    t = await db.tests.find_one({"test_id": tid}, {"_id": 0})
+    if not t:
+        raise HTTPException(status_code=404, detail="Test not found")
+    return {
+        "test_id": t["test_id"], "series_id": t["series_id"], "title": t["title"],
+        "duration_min": t["duration_min"], "paper": t.get("paper", ""),
+        "questions": t.get("questions", []),
+    }
+
+
+@api.post("/admin/tests")
+async def admin_create_test(body: AdminTestIn, _: Dict[str, Any] = Depends(require_admin)):
+    series = await db.test_series.find_one({"series_id": body.series_id})
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not found")
+    tid = f"test_{uuid.uuid4().hex[:10]}"
+    await db.tests.insert_one({
+        "test_id": tid, "series_id": body.series_id, "title": body.title,
+        "duration_min": body.duration_min, "paper": body.paper,
+        "questions": [q.dict() for q in body.questions],
+        "deleted_at": None, "created_at": now(),
+    })
+    return {"ok": True, "test_id": tid}
+
+
+@api.put("/admin/tests/{tid}")
+async def admin_update_test(tid: str, body: AdminTestUpdateIn, _: Dict[str, Any] = Depends(require_admin)):
+    update: Dict[str, Any] = {}
+    if body.title is not None:
+        update["title"] = body.title
+    if body.duration_min is not None:
+        update["duration_min"] = body.duration_min
+    if body.paper is not None:
+        update["paper"] = body.paper
+    if body.questions is not None:
+        update["questions"] = [q.dict() for q in body.questions]
+    if update:
+        await db.tests.update_one({"test_id": tid}, {"$set": update})
+    return {"ok": True}
+
+
+@api.delete("/admin/tests/{tid}")
+async def admin_delete_test(tid: str, _: Dict[str, Any] = Depends(require_admin)):
+    await db.tests.update_one({"test_id": tid}, {"$set": {"deleted_at": now()}})
+    return {"ok": True}
+
+
+# ----------------------------- Admin: Single user ---------------------------
+@api.get("/admin/users/{uid}")
+async def admin_user_detail(uid: str, _: Dict[str, Any] = Depends(require_admin)):
+    u = await db.users.find_one({"user_id": uid}, {"_id": 0, "password": 0})
+    if not u:
+        raise HTTPException(status_code=404, detail="User not found")
+    subs = await active_subscriptions(uid)
+    out_subs = []
+    for s in subs:
+        cat = await db.categories.find_one({"category_id": s.get("category_id")}, {"_id": 0}) if s.get("category_id") else None
+        out_subs.append({
+            "subscription_id": s["subscription_id"], "plan": s["plan"],
+            "category_id": s.get("category_id"),
+            "category_name": cat["name"] if cat else "All Categories",
+            "active_until": iso(s["active_until"]),
+        })
+    return {**public_user(u), "referred_by": u.get("referred_by"), "subscriptions": out_subs}
+
+
+@api.put("/admin/users/{uid}")
+async def admin_update_user(uid: str, body: UserUpdateIn, _: Dict[str, Any] = Depends(require_admin)):
+    update: Dict[str, Any] = {}
+    if body.is_admin is not None:
+        update["is_admin"] = body.is_admin
+    if body.token_balance is not None:
+        update["token_balance"] = max(0, int(body.token_balance))
+    if update:
+        await db.users.update_one({"user_id": uid}, {"$set": update})
+    return {"ok": True}
+
+
+@api.post("/admin/users/{uid}/grant-subscription")
+async def admin_grant_sub(uid: str, body: GrantSubIn, _: Dict[str, Any] = Depends(require_admin)):
+    u = await db.users.find_one({"user_id": uid})
+    if not u:
+        raise HTTPException(status_code=404, detail="User not found")
+    await db.subscriptions.insert_one({
+        "subscription_id": f"sub_{uuid.uuid4().hex[:12]}",
+        "user_id": uid, "plan": body.plan,
+        "category_id": body.category_id if body.plan == "single" else None,
+        "payment_order_id": None, "active": True,
+        "active_until": now() + timedelta(days=body.days),
+        "created_at": now(), "granted_by_admin": True,
+    })
+    await db.users.update_one({"user_id": uid}, {"$set": {"has_purchased": True}})
+    return {"ok": True}
+
+
+@api.post("/admin/users/{uid}/revoke-subscription")
+async def admin_revoke_sub(uid: str, subscription_id: Optional[str] = None, _: Dict[str, Any] = Depends(require_admin)):
+    query: Dict[str, Any] = {"user_id": uid, "active": True}
+    if subscription_id:
+        query["subscription_id"] = subscription_id
+    await db.subscriptions.update_many(query, {"$set": {"active": False, "revoked_at": now()}})
+    return {"ok": True}
+
+
+@api.put("/admin/referral-config")
+async def admin_referral_config(body: ReferralConfigIn, _: Dict[str, Any] = Depends(require_admin)):
+    await get_settings()
+    await db.settings.update_one({"_id": "app"}, {"$set": {
+        "referral_enabled": body.referral_enabled,
+        "tokens_per_referral": max(0, body.tokens_per_referral),
+        "token_value": max(1, body.token_value),
+        "payout_threshold": max(1, body.payout_threshold),
+    }})
+    return {"ok": True}
 
 
 app.include_router(api)

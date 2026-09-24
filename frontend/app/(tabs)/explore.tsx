@@ -31,7 +31,7 @@ export default function Explore() {
   const [livePlan, setLivePlan] = useState<Plan>("combo");
 
   const cats = useQuery({ queryKey: ["categories"], queryFn: () => api.get("/categories") });
-  const series = useQuery({ queryKey: ["test-series"], queryFn: () => api.get("/test-series") });
+  const series = useQuery({ queryKey: ["test-series"], queryFn: () => api.get("/test-series"), refetchInterval: 10000 });
   const pricing = useQuery({ queryKey: ["pricing"], queryFn: () => api.get("/pricing") });
 
   const filtered = useMemo(() => {
