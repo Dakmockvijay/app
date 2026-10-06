@@ -1034,7 +1034,7 @@ async def admin_create_series(body: SeriesIn, _: Dict[str, Any] = Depends(requir
 
 
 @api.get("/admin/sample-template")
-async def sample_template(_: Dict[str, Any] = Depends(require_admin)):
+async def sample_template():
     df = pd.DataFrame([{
         "Question Text (EN)": "The GDS to MTS exam is conducted by?",
         "Question Text (HI)": "जीडीएस से एमटीएस परीक्षा किसके द्वारा आयोजित की जाती है?",

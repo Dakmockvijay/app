@@ -1,16 +1,22 @@
 import React, { useState } from "react";
-import { Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { Platform, Pressable, ScrollView, Text, View, Linking } from "react-native";
 import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
-import { CaretRight, CaretLeft, Plus, UploadSimple, Clock, ListChecks, PencilSimple, FileArrowUp, WarningCircle, ArrowClockwise, CheckCircle } from "phosphor-react-native";
+import { CaretRight, CaretLeft, Plus, Clock, ListChecks, PencilSimple, MicrosoftExcelLogo, WarningCircle, ArrowClockwise, DownloadSimple } from "phosphor-react-native";
 
 import { api } from "@/src/api";
 import { queryClient } from "@/src/query-client";
 import { useToast } from "@/src/toast";
 import { Card, Loading, Badge } from "@/src/components/ui";
 import { makeStyles, useTheme, spacing, radius, fontSize } from "@/src/theme";
+
+const REQUIRED_COLS = [
+  "Test Name", "Question Text (EN)", "Option A (EN)", "Option B (EN)",
+  "Option C (EN)", "Option D (EN)", "Correct Answer (A/B/C/D)",
+];
+const OPTIONAL_COLS = ["Time Limit (min)", "Marks", "Paper", "Question Text (HI)", "Option A–D (HI)", "Explanation (EN/HI)"];
 
 export default function AdminManage() {
   const styles = useStyles();
@@ -25,7 +31,6 @@ export default function AdminManage() {
   const [isFree, setIsFree] = useState<boolean | null>(null);
   const [stype, setStype] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [file, setFile] = useState<any | null>(null);
 
   const level = cat === null ? 1 : isFree === null ? 2 : stype === null ? 3 : 4;
 
@@ -41,14 +46,14 @@ export default function AdminManage() {
   });
 
   const back = () => {
-    setFile(null);
     if (stype !== null) setStype(null);
     else if (isFree !== null) setIsFree(null);
     else if (cat !== null) setCat(null);
     else router.back();
   };
 
-  const pickFile = async () => {
+  const selectAndUpload = async () => {
+    if (!bucket.data) return;
     try {
       const res = await DocumentPicker.getDocumentAsync({
         type: ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", ".xlsx", ".xls"],
@@ -56,30 +61,25 @@ export default function AdminManage() {
         multiple: false,
       });
       if (res.canceled || !res.assets?.length) return;
-      setFile(res.assets[0]);
-    } catch (e: any) {
-      toast.show(e.message || "Could not open file picker", "error");
-    }
-  };
-
-  const doUpload = async () => {
-    if (!file || !bucket.data) return;
-    setUploading(true);
-    try {
+      const asset = res.assets[0];
+      setUploading(true);
       const form = new FormData();
-      if (Platform.OS === "web" && (file as any).file) form.append("file", (file as any).file);
-      else form.append("file", { uri: file.uri, name: file.name || "upload.xlsx", type: file.mimeType || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" } as any);
+      if (Platform.OS === "web" && (asset as any).file) form.append("file", (asset as any).file);
+      else form.append("file", { uri: asset.uri, name: asset.name || "upload.xlsx", type: asset.mimeType || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" } as any);
       form.append("category_id", cat.category_id);
       form.append("is_free", String(isFree));
       form.append("series_type", String(stype));
       const out = await api.uploadFile("/admin/bulk-upload-tagged", form);
       toast.show(`Uploaded ${out.tests_created} tests, ${out.questions_created} questions`, "success");
-      setFile(null);
       bucket.refetch();
       queryClient.invalidateQueries({ queryKey: ["test-series"] });
     } catch (e: any) {
       toast.show(e.message || "Upload failed", "error");
     } finally { setUploading(false); }
+  };
+
+  const downloadTemplate = () => {
+    Linking.openURL(`${api.baseUrl}/api/admin/sample-template`);
   };
 
   const crumb = [cat?.short, isFree === null ? null : isFree ? "Free" : "Paid", stype ? stype.toUpperCase() : null].filter(Boolean).join("  ›  ");
@@ -133,23 +133,39 @@ export default function AdminManage() {
                     <Plus size={18} color={colors.onBrandPrimary} weight="bold" /><Text style={styles.actText}>Add Test Manually</Text>
                   </Pressable>
 
+                  {/* Bulk upload card */}
+                  <Card style={styles.uploadCard}>
+                    <View style={styles.xlsBadge}>
+                      <MicrosoftExcelLogo size={34} color="#1D6F42" weight="fill" />
+                    </View>
+                    <Text style={styles.uploadTitle}>Upload Excel (.xlsx)</Text>
+                    <Text style={styles.uploadSub}>Rows with the same Test Name are grouped into one test.</Text>
+                    <Pressable testID="bulk-upload-tagged" onPress={selectAndUpload} style={[styles.uploadBtn, (uploading || !bucket.data) && { opacity: 0.6 }]} disabled={uploading || !bucket.data}>
+                      <Text style={styles.uploadBtnText}>{uploading ? "Uploading…" : "Select & Upload File"}</Text>
+                    </Pressable>
+                  </Card>
+
+                  {/* Sample template */}
                   <Card style={{ gap: spacing.md }}>
-                    <Text style={styles.uploadTitle}>Bulk upload via Excel (.xlsx)</Text>
-                    <Pressable testID="select-xlsx" onPress={pickFile} style={styles.selectBtn} disabled={!bucket.data}>
-                      <FileArrowUp size={20} color={colors.brandPrimary} weight="bold" />
-                      <Text style={styles.selectText} numberOfLines={1}>{file ? (file.name || "Selected file") : "Select .xlsx file"}</Text>
-                    </Pressable>
-                    {!!file && (
-                      <View style={styles.fileRow}>
-                        <CheckCircle size={16} color={colors.success} weight="fill" />
-                        <Text style={styles.fileName} numberOfLines={1}>{file.name}</Text>
-                        <Pressable testID="clear-file" onPress={() => setFile(null)}><Text style={styles.removeText}>Remove</Text></Pressable>
-                      </View>
-                    )}
-                    <Pressable testID="upload-xlsx" onPress={doUpload} style={[styles.actBtn, { backgroundColor: file ? colors.brandTertiary : colors.surfaceTertiary }]} disabled={!file || uploading || !bucket.data}>
-                      <UploadSimple size={18} color={file ? "#FFFFFF" : colors.muted} weight="bold" />
-                      <Text style={[styles.actText, !file && { color: colors.muted }]}>{uploading ? "Uploading…" : "Upload File"}</Text>
-                    </Pressable>
+                    <View style={styles.row}>
+                      <Text style={styles.tplTitle}>Sample Template</Text>
+                      <Pressable testID="download-template" onPress={downloadTemplate} style={styles.dlBtn}>
+                        <DownloadSimple size={16} color={colors.brandPrimary} weight="bold" />
+                        <Text style={styles.dlText}>Download</Text>
+                      </Pressable>
+                    </View>
+                    <Text style={styles.tplLabel}>Required columns</Text>
+                    <View style={styles.chipWrap}>
+                      {REQUIRED_COLS.map((c) => (
+                        <View key={c} style={[styles.chip, { backgroundColor: "#FDECEE" }]}><Text style={[styles.chipText, { color: colors.brandPrimary }]}>{c}</Text></View>
+                      ))}
+                    </View>
+                    <Text style={styles.tplLabel}>Optional columns</Text>
+                    <View style={styles.chipWrap}>
+                      {OPTIONAL_COLS.map((c) => (
+                        <View key={c} style={[styles.chip, { backgroundColor: colors.surfaceTertiary }]}><Text style={[styles.chipText, { color: colors.muted }]}>{c}</Text></View>
+                      ))}
+                    </View>
                   </Card>
 
                   {bucket.isLoading ? <Loading /> : (bucket.data?.tests || []).length === 0 ? (
@@ -192,12 +208,19 @@ const useStyles = makeStyles((colors) => ({
   actionRow: { flexDirection: "row", gap: spacing.md },
   actBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, paddingVertical: spacing.md, borderRadius: radius.md },
   actText: { color: "#FFFFFF", fontWeight: "800", fontSize: fontSize.base },
-  uploadTitle: { fontSize: fontSize.base, fontWeight: "800", color: colors.onSurface },
-  selectBtn: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: spacing.md, paddingHorizontal: spacing.lg, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.brandPrimary, borderStyle: "dashed" },
-  selectText: { flex: 1, color: colors.brandPrimary, fontWeight: "700", fontSize: fontSize.base },
-  fileRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  fileName: { flex: 1, color: colors.onSurfaceSecondary, fontSize: fontSize.sm, fontWeight: "600" },
-  removeText: { color: colors.error, fontWeight: "700", fontSize: fontSize.sm },
+  uploadCard: { alignItems: "center", gap: spacing.sm, borderWidth: 1.5, borderColor: colors.border, borderStyle: "dashed" },
+  xlsBadge: { width: 60, height: 60, borderRadius: radius.md, backgroundColor: "#E7F6EE", alignItems: "center", justifyContent: "center", marginBottom: spacing.xs },
+  uploadTitle: { fontSize: fontSize.lg, fontWeight: "900", color: colors.onSurface },
+  uploadSub: { fontSize: fontSize.sm, color: colors.muted, textAlign: "center", lineHeight: 18 },
+  uploadBtn: { alignSelf: "stretch", backgroundColor: colors.brandPrimary, paddingVertical: spacing.md, borderRadius: radius.md, alignItems: "center", marginTop: spacing.sm },
+  uploadBtnText: { color: colors.onBrandPrimary, fontWeight: "800", fontSize: fontSize.base },
+  tplTitle: { flex: 1, fontSize: fontSize.lg, fontWeight: "800", color: colors.onSurface },
+  dlBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.sm, borderWidth: 1.5, borderColor: colors.brandPrimary },
+  dlText: { color: colors.brandPrimary, fontWeight: "800", fontSize: fontSize.sm },
+  tplLabel: { fontSize: fontSize.sm, fontWeight: "700", color: colors.muted },
+  chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  chip: { paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.sm },
+  chipText: { fontSize: fontSize.sm, fontWeight: "700" },
   errTitle: { fontSize: fontSize.lg, fontWeight: "800", color: colors.onSurface },
   metaRow: { flexDirection: "row", gap: spacing.lg, borderTopWidth: 1, borderTopColor: colors.divider, paddingTop: spacing.sm },
   metaItem: { flexDirection: "row", alignItems: "center", gap: 4 },

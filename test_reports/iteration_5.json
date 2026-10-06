@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 5 — Verified the redesigned Level-4 Manage Tests bucket (single combined 'Select & Upload File' button + 'Sample Template Download' card + required/optional column chips) end-to-end across both backend (pytest, 7/7 passed) and frontend (Playwright, mobile 390x844). BACKEND: GET /api/admin/sample-template is now public (no auth) and returns 200 with Content-Type application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, Content-Disposition attachment; filename=dakmock_template.xlsx; body parses with openpyxl and contains the 8 required columns (Question Text (EN), Option A–D (EN), Correct Answer, Exam Category, Test Name). POST /api/admin/bulk-upload-tagged still consumes /app/sample_questions.xlsx and returns {ok:true, series_id, tests_created>=1, questions_created>=1} across multiple buckets (parametrized gds_mts/true/mock AND pa_sa/false/pyq); anonymous callers get 401/403. FRONTEND: Admin login (admin@dakmock.com / Admin@123) → /admin/manage renders lvl1 (gds_mts, postman_mailguard, pa_sa). Drilling gds_mts → Free → Mock renders the bucket WITHOUT the 'Can't load this bucket' error card (bucket-retry absent) and shows: add-manual button, 'Upload Excel (.xlsx)' card titled correctly with a single Pressable testID=bulk-upload-tagged whose label is exactly 'Select & Upload File', AND a 'Sample Template' card with testID=download-template plus 'Required columns' + 'Optional columns' chip groups. Clicking bulk-upload-tagged opens the native filechooser; after setting /app/sample_questions.xlsx the upload completes in a single step (no second button needed) and the list refreshes to show 3 manage-test rows including 'Mock Test 01 · Paper I · 30 min · 5 Qs'. The 'Download' button on the Sample Template card triggers a browser download (new window opened). The identical UI reappears in a second bucket (pa_sa → Paid → PYQ) and the upload succeeded there too (2 manage-test rows after upload). Deprecated RN Web warnings (pointerEvents, shadow*) still emitted at page load — unchanged from iter 4.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "RN Web deprecation (carry-over)", "issue": "'props.pointerEvents is deprecated. Use style.pointerEvents' emitted on every manage-screen render. Move pointerEvents from props to style. Reference: /app/frontend/app/admin/manage.tsx and shared Card/Pressable wrappers."},
+      {"component": "RN Web deprecation (carry-over)", "issue": "'\"shadow*\" style props are deprecated. Use \"boxShadow\".' Replace shadow* in StyleSheet.create blocks with boxShadow. Reference: /app/frontend/app/admin/manage.tsx uploadCard styles."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_sample_template_and_upload.py",
+    "/app/test_reports/pytest/pytest_iteration_5.xml"
+  ],
+  "action_items": [
+    "(Carry-over, cosmetic) Replace deprecated RN Web props: props.pointerEvents → style.pointerEvents, shadow* → boxShadow. No functional impact.",
+    "(Nice-to-have) The Sample Template Download uses Linking.openURL which opens a new tab on web; on native it will defer to the OS. Consider using expo-file-system/download for a consistent UX on native builds."
+  ],
+  "critical_code_review_comments": [
+    "server.py now ~1553 lines; admin/* endpoints should be split into /app/backend/routers/admin_*.py for maintainability (ensure-series, bulk-upload-tagged, sample-template, tests CRUD, series CRUD, announcements).",
+    "manage.tsx line 82 — downloadTemplate uses Linking.openURL(`${api.baseUrl}/api/admin/sample-template`). This relies on api.baseUrl being correct across environments. OK on preview (public endpoint, no auth) but if auth is later re-added to sample-template the Linking approach won't inject the bearer token — switch to fetch+blob or expo-file-system.",
+    "manage.tsx — REQUIRED_COLS / OPTIONAL_COLS chip lists are hard-coded in the client. Consider deriving them from the sample-template server response or an /api/admin/template-schema endpoint so the UI stays in sync with backend column changes.",
+    "Admin bulk-upload-tagged does not validate the file extension before pandas.read_excel — the error message currently originates from pandas. Add an explicit 400 if content_type/filename isn't .xlsx for clearer client errors."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_sample_template_and_upload.py",
+    "/app/test_reports/pytest/pytest_iteration_5.xml",
+    "/app/test_reports/iteration_5.json"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7 — 4 sample-template cases + 2 parametrized bulk-upload cases + 1 auth-guard case)",
+    "frontend": "100% on the redesigned level-4 Manage Tests UI across 2 distinct buckets (gds_mts/Free/Mock and pa_sa/Paid/PYQ) — bucket load, button labels, filechooser + one-step upload, list refresh, and template Download all verified via Playwright on mobile viewport 390x844."
+  },
+  "seed_data_creation": "Playwright uploaded /app/sample_questions.xlsx into two buckets (gds_mts/free/mock → 3 manage-test rows present after upload incl. prior-iter data; pa_sa/false/pyq → 2 rows). Backend pytest also created series+tests via POST /admin/bulk-upload-tagged for the same two buckets. Main agent may wish to purge TEST data if the production MongoDB is shared.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Pytest file: /app/backend/tests/test_sample_template_and_upload.py. Admin login returns {session_token, user} — use session_token as Bearer. Frontend testIDs confirmed present on /admin/manage level-4: manage-back, lvl1-{gds_mts|postman_mailguard|pa_sa}, lvl2-{true|false}, lvl3-{mock|pyq}, add-manual, bulk-upload-tagged (label 'Select & Upload File' — single combined button, filechooser fires on tap), download-template (Linking.openURL to /api/admin/sample-template, opens new tab on web), bucket-retry (only shown when ensure-series errors). To upload in Playwright: `async with page.expect_file_chooser(): await page.click('[data-testid=\"bulk-upload-tagged\"]', force=True)` then `fc.set_files(...)` — upload completes automatically after set_files (no second button). After upload, list auto-refreshes via refetchInterval + bucket.refetch(). Sample-template endpoint is PUBLIC (no auth) — do not add Authorization header when testing download URL from browser.",
+  "rca_of_issue": "No bugs found in this iteration. All stated features work: (1) bucket drill loads without the error card, (2) Upload Excel (.xlsx) card renders with a single 'Select & Upload File' Pressable, (3) Sample Template card renders with Download + required/optional chip groups, (4) one-tap filechooser → auto-upload → list refresh works, (5) GET /admin/sample-template is public with correct Content-Type and attachment disposition, (6) POST /admin/bulk-upload-tagged still works for multiple (category, is_free, series_type) buckets. Only unresolved items are two cosmetic RN Web deprecation warnings carried over from prior iterations."
+}
