@@ -29,6 +29,7 @@ export default function Home() {
   const cats = useQuery({ queryKey: ["categories"], queryFn: () => api.get("/categories") });
   const series = useQuery({ queryKey: ["test-series"], queryFn: () => api.get("/test-series"), refetchInterval: 10000 });
   const attempts = useQuery({ queryKey: ["attempts"], queryFn: () => api.get("/attempts"), refetchInterval: 15000 });
+  const analytics = useQuery({ queryKey: ["analytics"], queryFn: () => api.get("/analytics"), refetchInterval: 20000 });
   const announcement = useQuery({ queryKey: ["announcement"], queryFn: () => api.get("/announcements/active"), refetchInterval: 20000 });
 
   const [showAnn, setShowAnn] = useState(false);
@@ -54,6 +55,7 @@ export default function Home() {
     subs.refetch();
     series.refetch();
     attempts.refetch();
+    analytics.refetch();
   };
 
   if (loading) return <Loading label="Loading your dashboard…" />;
@@ -61,6 +63,8 @@ export default function Home() {
   const activeSubs: any[] = subs.data || [];
   const freeSeries: any[] = (series.data || []).filter((s: any) => s.is_free);
   const recentAttempts: any[] = (attempts.data || []).slice(0, 6);
+  const streak = analytics.data?.streak || { current: 0 };
+  const today = analytics.data?.today || { count: 0, goal: 3 };
 
   return (
     <View style={styles.root}>
@@ -102,6 +106,22 @@ export default function Home() {
         </View>
 
         <View style={styles.body}>
+          {/* Progress & streak */}
+          <Pressable testID="home-progress" onPress={() => router.push("/progress")}>
+            <Card style={styles.streakBanner}>
+              <View style={styles.fireCircle}>
+                <Fire size={24} color={colors.brandSecondary} weight="fill" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.streakBannerNum}>{streak.current}-day streak</Text>
+                <Text style={styles.streakBannerSub}>
+                  {today.count}/{today.goal} tests today · tap for insights
+                </Text>
+              </View>
+              <CaretRight size={20} color={colors.muted} />
+            </Card>
+          </Pressable>
+
           {/* Categories */}
           <Text style={styles.sectionTitle}>Exam Tiers</Text>
           <ScrollView
@@ -223,6 +243,17 @@ const useStyles = makeStyles((colors) => ({
   passSub: { color: "#CBD5E1", fontSize: fontSize.base, marginTop: 4 },
   passLink: { color: colors.brandSecondary, fontSize: fontSize.base, fontWeight: "700", marginTop: 6 },
   body: { padding: spacing.xl, gap: spacing.sm },
+  streakBanner: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: spacing.md },
+  fireCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.brandTertiary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  streakBannerNum: { fontSize: fontSize.lg, fontWeight: "900", color: colors.onSurface },
+  streakBannerSub: { fontSize: fontSize.sm, color: colors.muted, marginTop: 2, fontWeight: "600" },
   sectionTitle: {
     fontSize: fontSize.lg,
     fontWeight: "800",

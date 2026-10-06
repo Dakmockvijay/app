@@ -13,9 +13,13 @@ import {
   Clock,
   CheckCircle,
   Warning,
+  Lightning,
+  XCircle,
+  Lightbulb,
 } from "phosphor-react-native";
 
 import { api } from "@/src/api";
+import { storage } from "@/src/utils/storage";
 import { queryClient } from "@/src/query-client";
 import { useToast } from "@/src/toast";
 import { Loading } from "@/src/components/ui";
@@ -33,10 +37,15 @@ export default function Exam() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const toast = useToast();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, mode } = useLocalSearchParams<{ id: string; mode?: string }>();
+  const isPractice = mode === "practice";
+  const PROGRESS_KEY = `dakmock_progress_${id}`;
   const paletteRef = useRef<BottomSheetModal>(null);
 
-  const q = useQuery({ queryKey: ["test", id], queryFn: () => api.get(`/tests/${id}`) });
+  const q = useQuery({
+    queryKey: ["test", id, isPractice],
+    queryFn: () => api.get(`/tests/${id}${isPractice ? "?practice=true" : ""}`),
+  });
 
   const [current, setCurrent] = useState(0);
   const [answers, setAnswers] = useState<Record<number, number>>({});
@@ -45,51 +54,139 @@ export default function Exam() {
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [resumeData, setResumeData] = useState<any | null>(null);
+  const [ready, setReady] = useState(false);
   const startTime = useRef(Date.now());
+  const initDone = useRef(false);
 
   const questions: any[] = q.data?.questions || [];
 
+  // Initialise: fresh practice, or offer resume for a saved exam
   useEffect(() => {
-    if (q.data && timeLeft === null) {
-      setTimeLeft(q.data.duration_min * 60);
+    if (!q.data || initDone.current) return;
+    initDone.current = true;
+    if (isPractice) {
       startTime.current = Date.now();
+      setReady(true);
+      return;
     }
-  }, [q.data, timeLeft]);
+    (async () => {
+      const raw = await storage.getItem<string>(PROGRESS_KEY, "");
+      let saved: any = null;
+      try { saved = raw ? JSON.parse(raw) : null; } catch { saved = null; }
+      if (saved && saved.timeLeft > 0) {
+        setResumeData(saved);
+      } else {
+        setTimeLeft(q.data.duration_min * 60);
+        startTime.current = Date.now();
+        setReady(true);
+      }
+    })();
+  }, [q.data, isPractice]);
+
+  const persist = useCallback(() => {
+    if (isPractice || !ready || timeLeft === null) return;
+    const elapsed = Math.round((Date.now() - startTime.current) / 1000);
+    storage.setItem(
+      PROGRESS_KEY,
+      JSON.stringify({ answers, marked: Array.from(marked), current, timeLeft, elapsed }),
+    );
+  }, [isPractice, ready, timeLeft, answers, marked, current]);
+
+  // Save on answer / mark / navigation changes
+  useEffect(() => { persist(); }, [answers, marked, current]);
+  // Periodic save to capture remaining time
+  useEffect(() => {
+    if (isPractice) return;
+    const t = setInterval(persist, 15000);
+    return () => clearInterval(t);
+  }, [persist, isPractice]);
+
+  const doResume = () => {
+    const s = resumeData;
+    setAnswers(s.answers || {});
+    setMarked(new Set<number>(s.marked || []));
+    setCurrent(s.current || 0);
+    setTimeLeft(s.timeLeft);
+    startTime.current = Date.now() - (s.elapsed || 0) * 1000;
+    setResumeData(null);
+    setReady(true);
+  };
+
+  const startOver = async () => {
+    await storage.removeItem(PROGRESS_KEY);
+    setTimeLeft(q.data.duration_min * 60);
+    startTime.current = Date.now();
+    setResumeData(null);
+    setReady(true);
+  };
 
   const submit = useCallback(async () => {
     setSubmitting(true);
     try {
       const timeTaken = Math.round((Date.now() - startTime.current) / 1000);
       const payload = Object.fromEntries(Object.entries(answers).map(([k, v]) => [String(k), v]));
-      const res = await api.post(`/tests/${id}/submit`, { answers: payload, time_taken_sec: timeTaken });
+      const res = await api.post(`/tests/${id}/submit`, {
+        answers: payload,
+        time_taken_sec: timeTaken,
+        mode: isPractice ? "practice" : "exam",
+      });
+      await storage.removeItem(PROGRESS_KEY);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       queryClient.invalidateQueries({ queryKey: ["attempts"] });
       queryClient.invalidateQueries({ queryKey: ["series-tests"] });
+      queryClient.invalidateQueries({ queryKey: ["analytics"] });
       router.replace(`/results/${res.attempt_id}`);
     } catch (e: any) {
       toast.show(e.message || "Submit failed", "error");
       setSubmitting(false);
     }
-  }, [answers, id, router, toast]);
+  }, [answers, id, router, toast, isPractice]);
 
   useEffect(() => {
-    if (timeLeft === null) return;
+    if (isPractice || timeLeft === null) return;
     if (timeLeft <= 0) {
       submit();
       return;
     }
     const t = setTimeout(() => setTimeLeft((v) => (v === null ? v : v - 1)), 1000);
     return () => clearTimeout(t);
-  }, [timeLeft, submit]);
+  }, [timeLeft, submit, isPractice]);
 
-  if (q.isLoading || timeLeft === null) return <Loading label="Loading exam…" />;
+  // Resume prompt (exam only)
+  if (q.data && resumeData && !ready) {
+    return (
+      <View style={styles.resumeRoot}>
+        <View style={styles.resumeCard}>
+          <Clock size={40} color={colors.brandPrimary} weight="fill" />
+          <Text style={styles.resumeTitle}>Resume Test?</Text>
+          <Text style={styles.resumeText}>
+            You left this test with {fmt(resumeData.timeLeft)} remaining and{" "}
+            {Object.keys(resumeData.answers || {}).length} answered. Continue where you left off?
+          </Text>
+          <Pressable testID="resume-continue" onPress={doResume} style={styles.resumePrimary}>
+            <Text style={styles.resumePrimaryText}>Resume</Text>
+          </Pressable>
+          <Pressable testID="resume-startover" onPress={startOver} style={styles.resumeSecondary}>
+            <Text style={styles.resumeSecondaryText}>Start Over</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  if (q.isLoading || !ready) return <Loading label={isPractice ? "Loading practice…" : "Loading exam…"} />;
 
   const que = questions[current];
   const opts: string[] = (lang === "hi" && que.options_hi?.length ? que.options_hi : que.options_en) || [];
   const qtext = lang === "hi" && que.question_hi ? que.question_hi : que.question_en;
   const answeredCount = Object.keys(answers).length;
+  const revealed = isPractice && answers[current] !== undefined;
+  const correctIdx = que.correct_index;
+  const explanation = lang === "hi" && que.explanation_hi ? que.explanation_hi : que.explanation_en;
 
   const select = (i: number) => {
+    if (revealed) return; // locked after answering in practice
     Haptics.selectionAsync();
     setAnswers((a) => ({ ...a, [current]: i }));
   };
@@ -123,16 +220,23 @@ export default function Exam() {
   const statusTextColor = (i: number) =>
     marked.has(i) || answers[i] !== undefined ? "#FFFFFF" : colors.onSurfaceTertiary;
 
-  const lowTime = timeLeft <= 60;
+  const lowTime = timeLeft !== null && timeLeft <= 60;
 
   return (
     <View style={styles.root}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
-        <View style={[styles.timerBox, lowTime && { backgroundColor: colors.error }]}>
-          <Clock size={16} color="#FFFFFF" weight="bold" />
-          <Text style={styles.timer} testID="exam-timer">{fmt(timeLeft)}</Text>
-        </View>
+        {isPractice ? (
+          <View style={styles.practiceBox}>
+            <Lightning size={16} color={colors.onBrandSecondary} weight="fill" />
+            <Text style={styles.practiceLabel}>Practice</Text>
+          </View>
+        ) : (
+          <View style={[styles.timerBox, lowTime && { backgroundColor: colors.error }]}>
+            <Clock size={16} color="#FFFFFF" weight="bold" />
+            <Text style={styles.timer} testID="exam-timer">{fmt(timeLeft ?? 0)}</Text>
+          </View>
+        )}
         <View style={styles.langToggle}>
           {(["en", "hi"] as const).map((l) => (
             <Pressable
@@ -170,43 +274,82 @@ export default function Exam() {
         <View style={{ gap: spacing.md, marginTop: spacing.lg }}>
           {opts.map((o, i) => {
             const sel = answers[current] === i;
+            const isCorrect = revealed && i === correctIdx;
+            const isWrongPick = revealed && sel && i !== correctIdx;
             return (
               <Pressable
                 key={i}
                 testID={`option-${i}`}
                 onPress={() => select(i)}
-                style={[styles.option, sel && styles.optionSel]}
+                style={[
+                  styles.option,
+                  sel && !revealed && styles.optionSel,
+                  isCorrect && styles.optionCorrect,
+                  isWrongPick && styles.optionWrong,
+                ]}
               >
-                <View style={[styles.optBullet, sel && styles.optBulletSel]}>
-                  <Text style={[styles.optLetter, sel && styles.optLetterSel]}>
+                <View style={[styles.optBullet, sel && !revealed && styles.optBulletSel]}>
+                  <Text style={[styles.optLetter, sel && !revealed && styles.optLetterSel]}>
                     {String.fromCharCode(65 + i)}
                   </Text>
                 </View>
-                <Text style={[styles.optText, sel && styles.optTextSel]}>{o}</Text>
+                <Text style={[styles.optText, (sel || isCorrect) && styles.optTextSel]}>{o}</Text>
+                {isCorrect && <CheckCircle size={20} color={colors.success} weight="fill" />}
+                {isWrongPick && <XCircle size={20} color={colors.error} weight="fill" />}
               </Pressable>
             );
           })}
         </View>
+
+        {revealed && (
+          <View style={styles.feedbackBox}>
+            <View style={styles.feedbackHead}>
+              {answers[current] === correctIdx ? (
+                <>
+                  <CheckCircle size={20} color={colors.success} weight="fill" />
+                  <Text style={[styles.feedbackTitle, { color: colors.success }]}>Correct!</Text>
+                </>
+              ) : (
+                <>
+                  <XCircle size={20} color={colors.error} weight="fill" />
+                  <Text style={[styles.feedbackTitle, { color: colors.error }]}>
+                    Incorrect · Answer: {String.fromCharCode(65 + correctIdx)}
+                  </Text>
+                </>
+              )}
+            </View>
+            {!!explanation && (
+              <View style={styles.explRow}>
+                <Lightbulb size={16} color={colors.info} weight="fill" />
+                <Text style={styles.explText}>{explanation}</Text>
+              </View>
+            )}
+          </View>
+        )}
       </ScrollView>
 
       {/* Sticky bottom actions */}
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + spacing.sm }]}>
         <View style={styles.bottomRow}>
-          <Pressable testID="mark-review" onPress={toggleMark} style={styles.secBtn}>
-            <BookmarkSimple
-              size={18}
-              color={marked.has(current) ? colors.brandTertiary : colors.onSurfaceSecondary}
-              weight={marked.has(current) ? "fill" : "regular"}
-            />
-            <Text style={styles.secBtnText}>{marked.has(current) ? "Marked" : "Review"}</Text>
-          </Pressable>
-          <Pressable testID="clear-ans" onPress={clearAns} style={styles.secBtn}>
-            <Eraser size={18} color={colors.onSurfaceSecondary} />
-            <Text style={styles.secBtnText}>Clear</Text>
-          </Pressable>
+          {!isPractice && (
+            <>
+              <Pressable testID="mark-review" onPress={toggleMark} style={styles.secBtn}>
+                <BookmarkSimple
+                  size={18}
+                  color={marked.has(current) ? colors.brandTertiary : colors.onSurfaceSecondary}
+                  weight={marked.has(current) ? "fill" : "regular"}
+                />
+                <Text style={styles.secBtnText}>{marked.has(current) ? "Marked" : "Review"}</Text>
+              </Pressable>
+              <Pressable testID="clear-ans" onPress={clearAns} style={styles.secBtn}>
+                <Eraser size={18} color={colors.onSurfaceSecondary} />
+                <Text style={styles.secBtnText}>Clear</Text>
+              </Pressable>
+            </>
+          )}
           <Pressable testID="save-next" onPress={saveNext} style={styles.saveBtn}>
             <Text style={styles.saveBtnText}>
-              {current < questions.length - 1 ? "Save & Next" : "Save & Finish"}
+              {current < questions.length - 1 ? (isPractice ? "Next" : "Save & Next") : (isPractice ? "Finish" : "Save & Finish")}
             </Text>
             <CaretRight size={18} color={colors.onBrandPrimary} weight="bold" />
           </Pressable>
@@ -287,6 +430,16 @@ const useStyles = makeStyles((colors) => ({
     borderRadius: radius.sm,
   },
   timer: { color: "#FFFFFF", fontSize: fontSize.lg, fontWeight: "900", fontVariant: ["tabular-nums"] },
+  practiceBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.brandSecondary,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.sm,
+  },
+  practiceLabel: { color: colors.onBrandSecondary, fontSize: fontSize.base, fontWeight: "900" },
   langToggle: { flexDirection: "row", backgroundColor: "rgba(255,255,255,0.15)", borderRadius: radius.sm, padding: 2 },
   langBtn: { paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.sm - 2 },
   langActive: { backgroundColor: colors.brandSecondary },
@@ -310,6 +463,8 @@ const useStyles = makeStyles((colors) => ({
     borderColor: colors.border,
   },
   optionSel: { borderColor: colors.brandPrimary, backgroundColor: "#FDECEE" },
+  optionCorrect: { borderColor: colors.success, backgroundColor: "#E7F6EE" },
+  optionWrong: { borderColor: colors.error, backgroundColor: "#FDECEE" },
   optBullet: {
     width: 32,
     height: 32,
@@ -407,4 +562,35 @@ const useStyles = makeStyles((colors) => ({
     justifyContent: "center",
   },
   confirmBtnText: { color: colors.onBrandPrimary, fontWeight: "800", fontSize: fontSize.base },
+  feedbackBox: {
+    marginTop: spacing.lg,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: spacing.sm,
+  },
+  feedbackHead: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  feedbackTitle: { fontSize: fontSize.base, fontWeight: "900" },
+  explRow: { flexDirection: "row", gap: spacing.sm, alignItems: "flex-start" },
+  explText: { flex: 1, color: colors.onSurfaceSecondary, fontSize: fontSize.base, lineHeight: 20 },
+  resumeRoot: { flex: 1, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center", padding: spacing.xl },
+  resumeCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.xl,
+    alignItems: "center",
+    gap: spacing.md,
+    width: "100%",
+    maxWidth: 400,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  resumeTitle: { fontSize: fontSize.xl, fontWeight: "900", color: colors.onSurface },
+  resumeText: { fontSize: fontSize.base, color: colors.muted, textAlign: "center", lineHeight: 22 },
+  resumePrimary: { alignSelf: "stretch", backgroundColor: colors.brandPrimary, paddingVertical: spacing.md, borderRadius: radius.md, alignItems: "center", marginTop: spacing.sm },
+  resumePrimaryText: { color: colors.onBrandPrimary, fontWeight: "800", fontSize: fontSize.base },
+  resumeSecondary: { alignSelf: "stretch", paddingVertical: spacing.md, borderRadius: radius.md, alignItems: "center", borderWidth: 1.5, borderColor: colors.border },
+  resumeSecondaryText: { color: colors.onSurfaceSecondary, fontWeight: "800", fontSize: fontSize.base },
 }));

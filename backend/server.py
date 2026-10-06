@@ -12,7 +12,7 @@ from typing import List, Optional, Dict, Any, Annotated
 import httpx
 import bcrypt
 import pandas as pd
-from fastapi import FastAPI, APIRouter, HTTPException, Header, UploadFile, File, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Header, UploadFile, File, Form, Depends
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -80,6 +80,11 @@ class VerifyIn(BaseModel):
 class AttemptIn(BaseModel):
     answers: Dict[str, int] = {}  # question index (str) -> selected option index
     time_taken_sec: int = 0
+    mode: str = "exam"  # exam | practice
+
+
+class GoalIn(BaseModel):
+    daily_goal: int
 
 
 class PayoutIn(BaseModel):
@@ -179,6 +184,23 @@ class ReferralConfigIn(BaseModel):
     payout_threshold: int
 
 
+class ChangePasswordIn(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class PolicyIn(BaseModel):
+    terms: Optional[str] = None
+    refund: Optional[str] = None
+    privacy: Optional[str] = None
+
+
+class EnsureSeriesIn(BaseModel):
+    category_id: str
+    is_free: bool
+    series_type: str = "mock"  # mock | pyq
+
+
 # ----------------------------- Helpers ---------------------------------------
 def hash_pw(pw: str) -> str:
     return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
@@ -215,6 +237,7 @@ def public_user(u: Dict[str, Any]) -> Dict[str, Any]:
         "referral_code": u.get("referral_code"),
         "token_balance": u.get("token_balance", 0),
         "is_admin": u.get("is_admin", False),
+        "daily_goal": u.get("daily_goal", 3),
         "created_at": iso(u.get("created_at", now())),
     }
 
@@ -282,6 +305,27 @@ async def has_access(user_id: str, category_id: str) -> bool:
         if s["plan"] == "combo" or s.get("category_id") == category_id:
             return True
     return False
+
+
+async def ensure_series(category_id: str, is_free: bool, series_type: str) -> str:
+    """Find or create the single 'bucket' series for a (category, free/paid, type) combo."""
+    series_type = (series_type or "mock").lower()
+    existing = await db.test_series.find_one({
+        "category_id": category_id, "is_free": is_free,
+        "series_type": series_type, "is_bucket": True, "deleted_at": None,
+    })
+    if existing:
+        return existing["series_id"]
+    cat = await db.categories.find_one({"category_id": category_id}, {"_id": 0})
+    cat_name = cat["name"] if cat else category_id
+    title = f"{cat_name} · {'Free' if is_free else 'Paid'} · {series_type.upper()}"
+    sid = f"series_{uuid.uuid4().hex[:10]}"
+    await db.test_series.insert_one({
+        "series_id": sid, "title": title, "category_id": category_id,
+        "description": f"{series_type.upper()} tests", "is_free": is_free,
+        "series_type": series_type, "is_bucket": True, "deleted_at": None, "created_at": now(),
+    })
+    return sid
 
 
 # ----------------------------- Auth routes -----------------------------------
@@ -421,7 +465,7 @@ async def series_tests(series_id: str, user: Dict[str, Any] = Depends(get_curren
 
 
 @api.get("/tests/{test_id}")
-async def get_test(test_id: str, user: Dict[str, Any] = Depends(get_current_user)):
+async def get_test(test_id: str, practice: bool = False, user: Dict[str, Any] = Depends(get_current_user)):
     t = await db.tests.find_one({"test_id": test_id}, {"_id": 0})
     if not t:
         raise HTTPException(status_code=404, detail="Test not found")
@@ -431,14 +475,19 @@ async def get_test(test_id: str, user: Dict[str, Any] = Depends(get_current_user
         raise HTTPException(status_code=403, detail="Purchase required to access this test")
     questions = []
     for i, q in enumerate(t.get("questions", [])):
-        questions.append({
+        item = {
             "index": i,
             "question_en": q["question_en"],
             "question_hi": q.get("question_hi", ""),
             "options_en": q["options_en"],
             "options_hi": q.get("options_hi", []),
             "marks": q.get("marks", 1),
-        })
+        }
+        if practice:
+            item["correct_index"] = q["correct_index"]
+            item["explanation_en"] = q.get("explanation_en", "")
+            item["explanation_hi"] = q.get("explanation_hi", "")
+        questions.append(item)
     return {
         "test_id": t["test_id"],
         "title": t["title"],
@@ -501,6 +550,7 @@ async def submit_test(test_id: str, body: AttemptIn, user: Dict[str, Any] = Depe
         "unattempted": unattempted,
         "accuracy": accuracy,
         "time_taken_sec": body.time_taken_sec,
+        "mode": body.mode,
         "answers": body.answers,
         "detail": detail,
         "created_at": now(),
@@ -508,7 +558,7 @@ async def submit_test(test_id: str, body: AttemptIn, user: Dict[str, Any] = Depe
     await db.attempts.insert_one(doc)
 
     pipeline = [
-        {"$match": {"test_id": test_id}},
+        {"$match": {"test_id": test_id, "mode": {"$ne": "practice"}}},
         {"$sort": {"score": -1, "time_taken_sec": 1}},
         {"$group": {"_id": "$user_id", "best": {"$first": "$score"}}},
     ]
@@ -545,7 +595,7 @@ async def attempt_detail(attempt_id: str, user: Dict[str, Any] = Depends(get_cur
     if not a:
         raise HTTPException(status_code=404, detail="Attempt not found")
     pipeline = [
-        {"$match": {"test_id": a["test_id"]}},
+        {"$match": {"test_id": a["test_id"], "mode": {"$ne": "practice"}}},
         {"$sort": {"score": -1, "time_taken_sec": 1}},
         {"$group": {"_id": "$user_id", "best": {"$first": "$score"}}},
     ]
@@ -562,7 +612,7 @@ async def attempt_detail(attempt_id: str, user: Dict[str, Any] = Depends(get_cur
 @api.get("/tests/{test_id}/leaderboard")
 async def leaderboard(test_id: str, user: Dict[str, Any] = Depends(get_current_user)):
     pipeline = [
-        {"$match": {"test_id": test_id}},
+        {"$match": {"test_id": test_id, "mode": {"$ne": "practice"}}},
         {"$sort": {"score": -1, "time_taken_sec": 1}},
         {"$group": {"_id": "$user_id", "best": {"$first": "$score"},
                     "time": {"$first": "$time_taken_sec"}}},
@@ -581,6 +631,111 @@ async def leaderboard(test_id: str, user: Dict[str, Any] = Depends(get_current_u
             "is_me": r["_id"] == user["user_id"],
         })
     return rows
+
+
+# ----------------------------- Analytics / Streak / Goals --------------------
+@api.post("/me/goal")
+async def set_goal(body: GoalIn, user: Dict[str, Any] = Depends(get_current_user)):
+    goal = max(1, min(50, int(body.daily_goal)))
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"daily_goal": goal}})
+    return {"daily_goal": goal}
+
+
+def _streak_from_days(day_set: set, today) -> Dict[str, int]:
+    if not day_set:
+        return {"current": 0, "longest": 0, "active_days": 0}
+    days = sorted(day_set)
+    # longest run of consecutive days
+    longest = 1
+    run = 1
+    for i in range(1, len(days)):
+        if (days[i] - days[i - 1]).days == 1:
+            run += 1
+            longest = max(longest, run)
+        else:
+            run = 1
+    # current streak: counts back from today (or yesterday if nothing today)
+    current = 0
+    cursor = today
+    if cursor not in day_set:
+        cursor = today - timedelta(days=1)
+    while cursor in day_set:
+        current += 1
+        cursor = cursor - timedelta(days=1)
+    return {"current": current, "longest": longest, "active_days": len(day_set)}
+
+
+@api.get("/analytics")
+async def analytics(user: Dict[str, Any] = Depends(get_current_user)):
+    atts = await db.attempts.find(
+        {"user_id": user["user_id"]}, {"_id": 0, "detail": 0, "answers": 0}
+    ).sort("created_at", 1).to_list(1000)
+
+    # series_id -> category_id, category_id -> name
+    series_rows = await db.test_series.find({}, {"_id": 0, "series_id": 1, "category_id": 1}).to_list(1000)
+    s2c = {s["series_id"]: s.get("category_id") for s in series_rows}
+    cat_rows = await db.categories.find({}, {"_id": 0}).to_list(100)
+    c2name = {c["category_id"]: c.get("name", c.get("short", "Exam")) for c in cat_rows}
+
+    total = len(atts)
+    total_marks_sum = sum(a.get("total_marks", 0) for a in atts)
+    score_sum = sum(a.get("score", 0) for a in atts)
+    acc_sum = sum(a.get("accuracy", 0) for a in atts)
+    time_sum = sum(a.get("time_taken_sec", 0) for a in atts)
+    best_pct = 0.0
+    cat_agg: Dict[str, Dict[str, float]] = {}
+    day_set = set()
+    trend = []
+
+    for a in atts:
+        tm = a.get("total_marks", 0) or 1
+        pct = round((a.get("score", 0) / tm) * 100, 1)
+        best_pct = max(best_pct, pct)
+        created = a.get("created_at")
+        if isinstance(created, datetime):
+            day_set.add(created.date())
+        cid = s2c.get(a.get("series_id"))
+        if cid:
+            d = cat_agg.setdefault(cid, {"attempts": 0, "acc": 0.0, "pct": 0.0})
+            d["attempts"] += 1
+            d["acc"] += a.get("accuracy", 0)
+            d["pct"] += pct
+        trend.append({
+            "attempt_id": a.get("attempt_id"),
+            "date": iso(created) if isinstance(created, datetime) else None,
+            "title": a.get("test_title", ""),
+            "accuracy": a.get("accuracy", 0),
+            "score_pct": pct,
+        })
+
+    categories_out = []
+    for cid, d in cat_agg.items():
+        n = d["attempts"] or 1
+        categories_out.append({
+            "category_id": cid,
+            "name": c2name.get(cid, "Exam"),
+            "attempts": d["attempts"],
+            "avg_accuracy": round(d["acc"] / n, 1),
+            "avg_score_pct": round(d["pct"] / n, 1),
+        })
+    categories_out.sort(key=lambda x: x["avg_accuracy"], reverse=True)
+
+    today = now().date()
+    streak = _streak_from_days(day_set, today)
+    today_count = sum(1 for a in atts if isinstance(a.get("created_at"), datetime) and a["created_at"].date() == today)
+    goal = user.get("daily_goal", 3)
+
+    return {
+        "total_attempts": total,
+        "avg_score_pct": round((score_sum / total_marks_sum) * 100, 1) if total_marks_sum else 0.0,
+        "avg_accuracy": round(acc_sum / total, 1) if total else 0.0,
+        "best_score_pct": round(best_pct, 1),
+        "total_time_sec": time_sum,
+        "categories": categories_out,
+        "trend": trend[-15:],
+        "streak": streak,
+        "today": {"count": today_count, "goal": goal, "met": today_count >= goal},
+    }
 
 
 # ----------------------------- Subscriptions / Payments ----------------------
@@ -1178,6 +1333,115 @@ async def admin_referral_config(body: ReferralConfigIn, _: Dict[str, Any] = Depe
         "payout_threshold": max(1, body.payout_threshold),
     }})
     return {"ok": True}
+
+
+@api.post("/auth/change-password")
+async def change_password(body: ChangePasswordIn, user: Dict[str, Any] = Depends(get_current_user), authorization: Optional[str] = Header(default=None)):
+    if not user.get("password"):
+        raise HTTPException(status_code=400, detail="Password login is not enabled for this account (Google sign-in)")
+    if not verify_pw(body.current_password, user["password"]):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if body.current_password == body.new_password:
+        raise HTTPException(status_code=400, detail="New password must be different from current password")
+    if len(body.new_password) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"password": hash_pw(body.new_password)}})
+    if authorization and authorization.startswith("Bearer "):
+        cur = authorization.split(" ", 1)[1]
+        await db.user_sessions.delete_many({"user_id": user["user_id"], "session_token": {"$ne": cur}})
+    return {"ok": True}
+
+
+@api.get("/policies")
+async def get_policies():
+    p = await db.policies.find_one({"_id": "policies"}) or {}
+    return {
+        "terms": p.get("terms", ""), "refund": p.get("refund", ""), "privacy": p.get("privacy", ""),
+        "updated_at": iso(p["updated_at"]) if p.get("updated_at") else None,
+    }
+
+
+@api.put("/admin/policies")
+async def update_policies(body: PolicyIn, _: Dict[str, Any] = Depends(require_admin)):
+    update: Dict[str, Any] = {"updated_at": now()}
+    if body.terms is not None:
+        update["terms"] = body.terms
+    if body.refund is not None:
+        update["refund"] = body.refund
+    if body.privacy is not None:
+        update["privacy"] = body.privacy
+    await db.policies.update_one({"_id": "policies"}, {"$set": update}, upsert=True)
+    return {"ok": True}
+
+
+@api.post("/admin/ensure-series")
+async def ensure_series_ep(body: EnsureSeriesIn, _: Dict[str, Any] = Depends(require_admin)):
+    sid = await ensure_series(body.category_id, body.is_free, body.series_type)
+    tests = await db.tests.count_documents({"series_id": sid, "deleted_at": None})
+    return {"series_id": sid, "test_count": tests}
+
+
+@api.post("/admin/bulk-upload-tagged")
+async def bulk_upload_tagged(
+    file: UploadFile = File(...),
+    category_id: str = Form(...),
+    is_free: str = Form("false"),
+    series_type: str = Form("mock"),
+    _: Dict[str, Any] = Depends(require_admin),
+):
+    content = await file.read()
+    try:
+        df = pd.read_excel(BytesIO(content), engine="openpyxl").fillna("")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read Excel file: {e}")
+    sid = await ensure_series(category_id, is_free.lower() == "true", series_type)
+    letter_map = {"A": 0, "B": 1, "C": 2, "D": 3}
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for _, row in df.iterrows():
+        r = {k: row[k] for k in df.columns}
+        test_name = _col(r, "Test Name", "Test", "test_name")
+        if not test_name:
+            continue
+        try:
+            duration = int(float(_col(r, "Time Limit (min)", "Time Limit", "Duration") or 30))
+        except Exception:
+            duration = 30
+        try:
+            marks = float(_col(r, "Marks", "Mark") or 1)
+        except Exception:
+            marks = 1.0
+        correct_raw = _col(r, "Correct Answer", "Answer", "Correct").upper()
+        correct_index = letter_map.get(correct_raw, 0)
+        if correct_raw.isdigit():
+            correct_index = max(0, int(correct_raw) - 1)
+        opts_en = [_col(r, "Option A (EN)", "Option A"), _col(r, "Option B (EN)", "Option B"),
+                   _col(r, "Option C (EN)", "Option C"), _col(r, "Option D (EN)", "Option D")]
+        opts_hi = [_col(r, "Option A (HI)"), _col(r, "Option B (HI)"),
+                   _col(r, "Option C (HI)"), _col(r, "Option D (HI)")]
+        q = {
+            "question_en": _col(r, "Question Text (EN)", "Question Text", "Question"),
+            "question_hi": _col(r, "Question Text (HI)"),
+            "options_en": opts_en, "options_hi": opts_hi if any(opts_hi) else [],
+            "correct_index": correct_index,
+            "explanation_en": _col(r, "Explanation (EN)", "Explanation"),
+            "explanation_hi": _col(r, "Explanation (HI)"), "marks": marks,
+        }
+        paper = _col(r, "Paper", "Paper No")
+        key = f"{test_name}|{paper}"
+        if key not in grouped:
+            grouped[key] = {"test_name": test_name, "paper": paper, "duration": duration, "questions": []}
+        grouped[key]["questions"].append(q)
+
+    created_tests = created_questions = 0
+    for g in grouped.values():
+        await db.tests.insert_one({
+            "test_id": f"test_{uuid.uuid4().hex[:10]}", "series_id": sid,
+            "title": g["test_name"], "duration_min": g["duration"], "paper": g["paper"],
+            "questions": g["questions"], "deleted_at": None, "created_at": now(),
+        })
+        created_tests += 1
+        created_questions += len(g["questions"])
+    return {"ok": True, "series_id": sid, "tests_created": created_tests, "questions_created": created_questions}
 
 
 app.include_router(api)

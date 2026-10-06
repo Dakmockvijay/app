@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
@@ -10,12 +10,16 @@ import {
   CaretRight,
   Ticket,
   CalendarCheck,
+  Lock,
+  FileText,
+  ChartLineUp,
 } from "phosphor-react-native";
 
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { usesNativeTabs } from "@/src/navigation";
 import { Card, Badge } from "@/src/components/ui";
+import { ChangePasswordSheet } from "@/src/components/change-password-sheet";
 import { makeStyles, useTheme, spacing, fontSize } from "@/src/theme";
 
 export default function Profile() {
@@ -24,6 +28,7 @@ export default function Profile() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user, signOut } = useAuth();
+  const [showPw, setShowPw] = useState(false);
   const bottomChrome = usesNativeTabs ? insets.bottom : 0;
 
   const subs = useQuery({ queryKey: ["subscriptions"], queryFn: () => api.get("/subscriptions") });
@@ -78,6 +83,13 @@ export default function Profile() {
           )}
 
           <Text style={styles.sectionTitle}>Account</Text>
+          <Pressable testID="nav-progress" onPress={() => router.push("/progress")}>
+            <Card style={styles.linkRow}>
+              <ChartLineUp size={22} color={colors.success} weight="fill" />
+              <Text style={styles.linkText}>My Progress & Streak</Text>
+              <CaretRight size={18} color={colors.muted} />
+            </Card>
+          </Pressable>
           {user?.is_admin && (
             <Pressable testID="nav-admin" onPress={() => router.push("/admin")}>
               <Card style={styles.linkRow}>
@@ -102,6 +114,29 @@ export default function Profile() {
             </Card>
           </Pressable>
 
+          <Pressable testID="nav-change-password" onPress={() => setShowPw(true)}>
+            <Card style={styles.linkRow}>
+              <Lock size={22} color={colors.brandTertiary} weight="fill" />
+              <Text style={styles.linkText}>Change Password</Text>
+              <CaretRight size={18} color={colors.muted} />
+            </Card>
+          </Pressable>
+
+          <Text style={styles.sectionTitle}>Legal</Text>
+          {[
+            { k: "terms", l: "Terms & Conditions" },
+            { k: "refund", l: "Refund Policy" },
+            { k: "privacy", l: "Privacy Policy" },
+          ].map((p) => (
+            <Pressable key={p.k} testID={`nav-policy-${p.k}`} onPress={() => router.push(`/policy/${p.k}`)}>
+              <Card style={styles.linkRow}>
+                <FileText size={22} color={colors.info} weight="fill" />
+                <Text style={styles.linkText}>{p.l}</Text>
+                <CaretRight size={18} color={colors.muted} />
+              </Card>
+            </Pressable>
+          ))}
+
           <Pressable testID="logout-btn" onPress={signOut}>
             <Card style={[styles.linkRow, { marginTop: spacing.lg }]}>
               <SignOut size={22} color={colors.error} weight="fill" />
@@ -112,6 +147,7 @@ export default function Profile() {
           <Text style={styles.version}>DakMock v1.0 · dakmock.com</Text>
         </View>
       </ScrollView>
+      <ChangePasswordSheet visible={showPw} onClose={() => setShowPw(false)} />
     </View>
   );
 }

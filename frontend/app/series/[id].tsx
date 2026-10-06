@@ -3,7 +3,7 @@ import { FlatList, Pressable, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { CaretLeft, Clock, ListChecks, Play, ChartBar } from "phosphor-react-native";
+import { CaretLeft, Clock, ListChecks, Play, ChartBar, Lightning } from "phosphor-react-native";
 
 import { api } from "@/src/api";
 import { Card, Loading, Badge } from "@/src/components/ui";
@@ -110,6 +110,14 @@ export default function SeriesDetail() {
                 </Pressable>
               )}
             </View>
+            <Pressable
+              testID={`practice-test-${item.test_id}`}
+              style={styles.practiceBtn}
+              onPress={() => router.push(`/exam/${item.test_id}?mode=practice`)}
+            >
+              <Lightning size={16} color={colors.brandTertiary} weight="fill" />
+              <Text style={styles.practiceText}>Practice Mode · instant feedback</Text>
+            </Pressable>
           </Card>
           );
         }}
@@ -160,4 +168,17 @@ const useStyles = makeStyles((colors) => ({
     borderColor: colors.brandPrimary,
   },
   resultText: { color: colors.brandPrimary, fontWeight: "800", fontSize: fontSize.base },
+  practiceBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: "#FFF8E6",
+    borderWidth: 1,
+    borderColor: colors.brandSecondary,
+  },
+  practiceText: { color: colors.brandTertiary, fontWeight: "800", fontSize: fontSize.sm },
 }));

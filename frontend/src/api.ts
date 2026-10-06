@@ -1,6 +1,7 @@
 import { storage } from "@/src/utils/storage";
+import { API_BASE_URL } from "@/src/config";
 
-const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
+const BASE = API_BASE_URL;
 const TOKEN_KEY = "dakmock_session_token";
 
 let inMemoryToken: string | null = null;

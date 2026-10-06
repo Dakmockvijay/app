@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: dakmock-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: yarn install && npx expo export --platform web
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

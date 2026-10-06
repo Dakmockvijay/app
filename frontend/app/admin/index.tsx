@@ -13,6 +13,8 @@ import {
   BookOpen,
   Megaphone,
   Gift,
+  FileText,
+  FolderSimple,
 } from "phosphor-react-native";
 
 import { api } from "@/src/api";
@@ -30,10 +32,12 @@ export default function AdminHome() {
   const s = stats.data || {};
 
   const tiles = [
-    { key: "series", label: "Test Series & Tests", icon: <BookOpen size={26} color={colors.brandPrimary} weight="fill" />, route: "/admin/series", count: s.test_series },
+    { key: "manage", label: "Manage Tests", icon: <BookOpen size={26} color={colors.brandPrimary} weight="fill" />, route: "/admin/manage", count: s.tests },
+    { key: "series", label: "Series Library", icon: <FolderSimple size={26} color={colors.info} weight="fill" />, route: "/admin/series", count: s.test_series },
     { key: "users", label: "User Management", icon: <Users size={26} color={colors.brandTertiary} weight="fill" />, route: "/admin/users", count: s.users },
     { key: "announcements", label: "Announcements", icon: <Megaphone size={26} color={colors.warning} weight="fill" />, route: "/admin/announcements" },
     { key: "upload", label: "Bulk Test Upload", icon: <UploadSimple size={26} color={colors.info} weight="fill" />, route: "/admin/upload", count: s.tests },
+    { key: "policies", label: "Policy Pages", icon: <FileText size={26} color={colors.brandTertiary} weight="fill" />, route: "/admin/policies" },
     { key: "pricing", label: "Pricing & Gateway", icon: <Tag size={26} color={colors.success} weight="fill" />, route: "/admin/pricing" },
     { key: "referral", label: "Referral Settings", icon: <Gift size={26} color={colors.brandPrimary} weight="fill" />, route: "/admin/referral" },
     { key: "payouts", label: "Payout Requests", icon: <Coins size={26} color={colors.warning} weight="fill" />, route: "/admin/payouts", count: s.pending_payouts, badge: s.pending_payouts },

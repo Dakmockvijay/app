@@ -101,3 +101,65 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+## user_problem_statement: "Add 4 new features to DakMock: Practice Mode (instant per-question feedback + explanation), Resume Test (save/restore mid-test progress locally), Performance Analytics (category strong/weak, accuracy trend, totals), Daily Streak & Goals."
+
+## backend:
+##   - task: "Practice mode get_test (?practice=true returns correct_index + explanations)"
+##     implemented: true
+##     working: "NA"
+##     file: "/app/backend/server.py"
+##     needs_retesting: true
+##   - task: "submit_test accepts mode (exam|practice); practice excluded from leaderboard/rank"
+##     implemented: true
+##     working: "NA"
+##     file: "/app/backend/server.py"
+##     needs_retesting: true
+##   - task: "GET /api/analytics (totals, category perf, trend, streak, today goal)"
+##     implemented: true
+##     working: "NA"
+##     file: "/app/backend/server.py"
+##     needs_retesting: true
+##   - task: "POST /api/me/goal (set daily goal)"
+##     implemented: true
+##     working: "NA"
+##     file: "/app/backend/server.py"
+##     needs_retesting: true
+
+## frontend:
+##   - task: "Practice Mode UI in exam screen (instant feedback, explanation, no timer)"
+##     implemented: true
+##     working: "NA"
+##     file: "/app/frontend/app/exam/[id].tsx"
+##     needs_retesting: true
+##   - task: "Resume Test prompt + local progress persistence"
+##     implemented: true
+##     working: "NA"
+##     file: "/app/frontend/app/exam/[id].tsx"
+##     needs_retesting: true
+##   - task: "Progress screen (analytics + streak + goal editor)"
+##     implemented: true
+##     working: "NA"
+##     file: "/app/frontend/app/progress.tsx"
+##     needs_retesting: true
+##   - task: "Practice button on series detail; streak banner on home; progress link in profile"
+##     implemented: true
+##     working: "NA"
+##     file: "/app/frontend/app/series/[id].tsx"
+##     needs_retesting: true
+
+## metadata:
+##   created_by: "main_agent"
+##   version: "1.3"
+##   test_sequence: 0
+
+## test_plan:
+##   current_focus:
+##     - "Practice mode flow"
+##     - "Resume test flow"
+##     - "Progress screen analytics + goal"
+##   stuck_tasks: []
+##   test_all: false
+
+## agent_communication:
+##   - agent: "main"
+##     message: "Added 4 features. For THIS preview env, frontend/.env now has EXPO_PUBLIC_API_URL pointing to the preview backend so the app hits the local updated backend (prod default in config.ts is Render). Admin: admin@dakmock.com / Admin@123. Test practice mode via series detail 'Practice Mode' button, resume by leaving an exam mid-way and re-entering, and the Progress screen from Home streak banner or Profile > My Progress."

@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 3 (Practice Mode + Resume Test + Analytics + Daily Streak/Goal) tested end-to-end. BACKEND: 12/12 new pytest cases pass in /app/backend/tests/test_new_features.py — practice GET returns correct_index + explanation_en/hi; plain GET /api/tests/{id} does NOT leak correct_index; POST /api/tests/{id}/submit accepts mode (exam|practice); leaderboard GET excludes practice attempts (practice-only user is NOT in /tests/{id}/leaderboard); exam submit returns rank/percentile from exam-only pool; POST /api/me/goal updates & clamps to 1..50 (0→1, -5→1, 500→50, 7→7) and is reflected in GET /analytics.today.goal; /analytics shape covers total_attempts, avg_score_pct, avg_accuracy, best_score_pct, total_time_sec, categories[], trend[], streak{current,longest,active_days}, today{count,goal,met}. FRONTEND (mobile 390x844): Admin login works, Progress screen reachable via Profile→'My Progress & Streak' AND via Home streak banner (shown after any attempt) which navigates to /progress; streak card shows '1 day streak', Longest 1 days, Active 1 days; Today's Goal card renders '0/5 tests' then after Edit→+2→Save becomes '0/7 tests' (toast 'Daily goal updated'); re-opening /progress still shows 0/7 (persisted). Practice Mode: on free series detail each test row shows yellow 'Practice Mode · instant feedback' banner (acts as practice-mode button); tapping it navigates to /exam/{id}?mode=practice; exam screen shows yellow 'Practice' chip and NO exam-timer; selecting correct option A paints card green with CheckCircle icon and shows 'Correct!' + explanation lightbulb row ('GDS stands for Gramin Dak Sevak.'); Next button advances through 5 Qs, label flips to 'Finish' on last, confirm modal → confirm-submit → lands on /results/att_* with 100% percentile, '#1 of 0' (practice attempts excluded from exam leaderboard so other users' totals are 0 — expected). Resume Test: code review of /app/frontend/app/exam/[id].tsx confirms correct implementation — PROGRESS_KEY='dakmock_progress_<id>' persisted via storage.setItem on every answer/mark/current change + 15s heartbeat; on remount with mode!=practice, if saved.timeLeft>0 the Resume prompt is rendered with testIDs resume-continue (restores answers/marked/current/timeLeft/startTime) and resume-startover (removes key and resets timer). Could not fully reproduce the Resume prompt via Playwright in web preview due to a global 'Choose your pass' modal that intermittently stole focus on /series/[id] (admin has no active sub so modal auto-opens on first paid-tile view) and the admin-is-admin branch skipping the free-series direct 'Start Test' tap path within our automation window — the Practice mode submit succeeded fine with the same testIDs. Logic is correct per code review and backend submit with mode='exam' works. Deprecated-prop warnings persist from prior iterations (pointerEvents, shadow*).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "series/[id].tsx", "issues": ["There is no dedicated testID='practice-mode-btn'; the 'Practice Mode · instant feedback' chip IS tappable and routes to ?mode=practice, but adding a stable testID would make E2E automation deterministic."]}
+    ],
+    "react_native_issues": [
+      {"component": "RN Web deprecation (carry-over)", "issue": "'props.pointerEvents is deprecated. Use style.pointerEvents' still emitted at load. Move pointerEvents into style."},
+      {"component": "RN Web deprecation (carry-over)", "issue": "'shadow* style props are deprecated. Use boxShadow.' Replace shadow* in StyleSheet with boxShadow."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_new_features.py",
+    "/app/test_reports/pytest/pytest_new_features.xml"
+  ],
+  "action_items": [
+    "(Nice-to-have) Add testID='practice-mode-btn' to the yellow 'Practice Mode' chip on /series/[id].tsx test rows so Playwright can target it directly instead of relying on text.",
+    "(Nice-to-have) On results screen for a practice attempt, consider hiding the 'rank/percentile' widget OR labelling it 'Practice — not ranked'. Right now a practice submit shows '#1 of 0' which is technically correct (practice is excluded from the exam pool) but can look odd to users.",
+    "(Carry-over) RN Web deprecation warnings (pointerEvents→style, shadow*→boxShadow). Cosmetic only."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now ~1550 lines and continues to grow; please split into modules (auth, catalog, attempts/analytics, admin_*, payments, seed).",
+    "/api/analytics counts ALL attempts (including practice) for total_attempts/avg_* and for streak/today.count. This matches the review request wording ('practice is excluded only from leaderboard & rank') but it may surprise users seeing their avg_score boosted by practice. Consider either (a) separating 'practice_attempts' from 'exam_attempts' in the response or (b) filtering {mode: {$ne: 'practice'}} for score/accuracy aggregates while keeping streak/today.count inclusive.",
+    "Progress persistence in exam/[id].tsx is good, but the resume prompt shows the ORIGINAL timeLeft even if the user left the test paused for hours. This is intentional in current code but is effectively lenient — consider decaying timeLeft by wall-clock delta since last save.",
+    "exam/[id].tsx — 'startTime.current = Date.now() - (s.elapsed || 0) * 1000' on resume is correct, but during pause we don't update elapsed, so time_taken_sec on submit may undercount if user resumes later. Acceptable, but worth noting."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_new_features.py",
+    "/app/test_reports/pytest/pytest_new_features.xml",
+    "/app/test_reports/iteration_3.json"
+  ],
+  "success_rate": {"backend": "100% (12/12 new + prior 23 unchanged)", "frontend": "Progress + Goal edit + Practice Mode submit→results verified live; Streak banner tap→/progress verified live; Resume prompt verified via code review (not fully reproducible via Playwright due to pass-modal interception in series page for admin)."},
+  "seed_data_creation": "Created ephemeral test users prefixed test_newfeat_* and test_prac_only_* for backend tests (cleaned up by pytest module scope). Admin user daily_goal left at 7 (changed from 3) after the live goal edit verification — main agent may want to reset to 3 if desired.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "New pytest file at /app/backend/tests/test_new_features.py covers: (a) GET /api/tests/{id} with and without ?practice=true, (b) POST /api/tests/{id}/submit with mode='exam' vs 'practice' and GET /api/tests/{id}/leaderboard exclusion, (c) POST /api/me/goal clamp 1..50 and GET /analytics reflection, (d) GET /api/analytics full shape + attempts/streak/today reflection. Run with: pytest backend/tests/test_new_features.py -v -n 0 (xdist 'loadscope' splits fixtures per worker and breaks the module-scoped user fixture — single-worker is required). Frontend testIDs used this iteration: streak-current, goal-progress, edit-goal, goal-value, goal-plus, goal-minus, goal-save, goal-cancel, exam-timer, option-0..N, save-next, confirm-submit, open-palette, resume-continue, resume-startover, home-streak-banner (home banner — only rendered when user has at least one attempt).",
+  "rca_of_issue": "N/A — no functional defects. Only cosmetic suggestions and one small UX note on practice-attempt rank display on results page."
+}

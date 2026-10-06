@@ -29,7 +29,11 @@ export default function Results() {
 
   if (attempt.isLoading || !attempt.data) return <Loading label="Calculating your score…" />;
   const a = attempt.data;
+  const isPractice = a.mode === "practice";
   const detail: any[] = a.detail || [];
+  const tabs: Tab[] = (["analysis", "leaderboard", "explanations"] as Tab[]).filter(
+    (t) => !(isPractice && t === "leaderboard"),
+  );
 
   return (
     <View style={styles.root}>
@@ -43,9 +47,14 @@ export default function Results() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xl }}>
         {/* Score hero */}
         <View style={styles.hero}>
+          {isPractice && (
+            <View style={{ marginBottom: spacing.md }}>
+              <Badge label="PRACTICE SESSION" color={colors.onBrandSecondary} bg={colors.brandSecondary} />
+            </View>
+          )}
           <View style={styles.ring}>
-            <Text style={styles.percentile}>{a.percentile}%</Text>
-            <Text style={styles.percentileLabel}>percentile</Text>
+            <Text style={styles.percentile}>{isPractice ? a.accuracy : a.percentile}%</Text>
+            <Text style={styles.percentileLabel}>{isPractice ? "accuracy" : "percentile"}</Text>
           </View>
           <View style={styles.scoreRow}>
             <View style={styles.scoreItem}>
@@ -54,18 +63,27 @@ export default function Results() {
             </View>
             <View style={styles.divider} />
             <View style={styles.scoreItem}>
-              <View style={styles.rankRow}>
-                <Trophy size={18} color={colors.brandSecondary} weight="fill" />
-                <Text style={styles.scoreVal}>#{a.rank}</Text>
-              </View>
-              <Text style={styles.scoreLabel}>of {a.total_users} · All India</Text>
+              {isPractice ? (
+                <>
+                  <Text style={styles.scoreVal}>{a.correct}</Text>
+                  <Text style={styles.scoreLabel}>Correct · not ranked</Text>
+                </>
+              ) : (
+                <>
+                  <View style={styles.rankRow}>
+                    <Trophy size={18} color={colors.brandSecondary} weight="fill" />
+                    <Text style={styles.scoreVal}>#{a.rank}</Text>
+                  </View>
+                  <Text style={styles.scoreLabel}>of {a.total_users} · All India</Text>
+                </>
+              )}
             </View>
           </View>
         </View>
 
         {/* Segmented */}
         <View style={styles.segment}>
-          {(["analysis", "leaderboard", "explanations"] as Tab[]).map((t) => (
+          {tabs.map((t) => (
             <Pressable
               key={t}
               testID={`tab-${t}`}
