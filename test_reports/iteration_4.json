@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 4: Admin > Manage Tests 4-level bucket + Add Manual + Bulk .xlsx upload tested end-to-end against the preview backend (local server, NOT the outdated Render). BACKEND: 12/12 new pytest cases pass in /app/backend/tests/test_bulk_upload.py — POST /api/admin/ensure-series returns 200 with series_id for all (category x is_free x series_type) combos, is idempotent (same payload returns same series_id), rejects anonymous callers (401), and the follow-up GET /admin/test-series/{sid}/tests returns a list. POST /api/admin/bulk-upload-tagged consumes /app/sample_questions.xlsx (multipart with category_id, is_free, series_type) and returns {ok:true, series_id, tests_created>=1, questions_created>=5}; the newly created test is fetchable via GET /admin/tests/{tid} with 4 options_en and a valid correct_index; posting a non-xlsx returns 400; anonymous POST is rejected. FRONTEND (mobile 390x844, Playwright): admin login via submit-auth works, /admin/manage loads with testIDs manage-back + lvl1-{gds_mts,postman_mailguard,pa_sa}. Flow lvl1-gds_mts → lvl2-true (Free) → lvl3-mock renders bucket WITHOUT the error card (no bucket-retry) — the Add Test Manually and Bulk Upload card appear. 'add-manual' is enabled and navigates to /admin/test-editor?seriesId=series_27bd1b5695. 'select-xlsx' triggers the native filechooser; after setting /app/sample_questions.xlsx, the filename 'sample_questions.xlsx' renders with a green CheckCircle and a Remove link, and 'upload-xlsx' flips from aria-disabled=true to enabled. Tapping upload-xlsx uploads successfully, a success toast fires, and the bucket list refetch now shows the new row 'Mock Test 01 · Paper I · 30 min · 5 Qs'. Deprecated-prop warnings (pointerEvents, shadow*) persist from prior iterations.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "RN Web deprecation (carry-over)", "issue": "'props.pointerEvents is deprecated. Use style.pointerEvents' still emitted at load. Move pointerEvents into style."},
+      {"component": "RN Web deprecation (carry-over)", "issue": "'shadow* style props are deprecated. Use boxShadow.' Replace shadow* in StyleSheet with boxShadow."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_bulk_upload.py",
+    "/app/test_reports/pytest/pytest_bulk_upload.xml"
+  ],
+  "action_items": [
+    "(Nice-to-have) After a successful upload, consider auto-collapsing the file row + resetting focus to the newly created test; currently the file row is cleared and the test appears in the list which is fine, but a toast-only confirmation can be missed.",
+    "(Nice-to-have) 'upload-xlsx' uses backgroundColor from colors.surfaceTertiary when disabled — contrast of the UploadSimple icon + 'Upload File' label against surfaceTertiary is acceptable but could be slightly stronger on light theme.",
+    "(Carry-over) RN Web deprecation warnings (pointerEvents→style, shadow*→boxShadow). Cosmetic only."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now ~1550 lines; the admin/* endpoints (ensure-series, bulk-upload-tagged, tests CRUD, series CRUD, announcements) should be split into /app/backend/routers/admin_*.py for maintainability.",
+    "/admin/bulk-upload-tagged quietly coerces is_free from the string 'true'/'false' (case-insensitive). This matches the UI (String(isFree)), but add an explicit 400 if the value isn't in {'true','false'} to catch client bugs early.",
+    "manage.tsx — bucket.refetch() is called after upload but refetchInterval:8000 already drives it; good. Consider also calling queryClient.invalidateQueries({ queryKey: ['test-series'] }) with a stale time to force student-side lists to refresh (already done ✓).",
+    "manage.tsx — the Pressable testID 'lvl2-true' uses String(o.k) which produces 'lvl2-true' / 'lvl2-false'. Fine for tests, but a semantic key ('lvl2-free'/'lvl2-paid') would be clearer."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_bulk_upload.py",
+    "/app/test_reports/pytest/pytest_bulk_upload.xml",
+    "/app/test_reports/iteration_4.json"
+  ],
+  "success_rate": {"backend": "100% (12/12 new)", "frontend": "100% on the Manage Tests 4-level + Add Manual + Bulk upload flow verified live via Playwright on mobile viewport 390x844"},
+  "seed_data_creation": "Backend tests exercised ensure-series on gds_mts/postman_mailguard/pa_sa × free/paid × mock/pyq buckets (idempotent, no duplicate series). The Playwright flow uploaded sample_questions.xlsx into the gds_mts/free/mock bucket, creating 'Mock Test 01' (5 Qs, 30 min, Paper I). Main agent may want to purge these if the production MongoDB is shared.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "New pytest file: /app/backend/tests/test_bulk_upload.py — run with EXPO_PUBLIC_BACKEND_URL set, uses parametrized bucket matrix. Frontend testIDs used this iteration (all present on /admin/manage): manage-back, lvl1-{gds_mts|postman_mailguard|pa_sa}, lvl2-true, lvl2-false, lvl3-mock, lvl3-pyq, add-manual, select-xlsx, upload-xlsx, clear-file, bucket-retry (only when ensure-series errors), manage-test-{test_id}. On web, expo-document-picker exposes a native filechooser event — bind with page.once('filechooser', lambda fc: fc.set_files(path)) BEFORE clicking select-xlsx. The upload button uses aria-disabled attribute; disabled → 'true', enabled → None.",
+  "rca_of_issue": "Original bug: 'Add Manual' and 'Bulk .xlsx' silently did nothing because the production (Render) backend returned 404 for /admin/ensure-series, so bucket.data stayed null and the Pressables remained disabled. Fix landed: frontend now targets the preview backend (which has these endpoints), and the UI gained a clear bucket-retry error card + a two-step Select-then-Upload flow. Both ensure-series (200) and bulk-upload-tagged (200 with tests_created>=1) now work end-to-end on preview; the UI correctly enables add-manual and upload-xlsx once bucket.data arrives and the file is picked."
+}
