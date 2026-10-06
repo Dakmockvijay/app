@@ -52,8 +52,20 @@ export default function AdminManage() {
     else router.back();
   };
 
+  const addManual = async () => {
+    try {
+      let sid = bucket.data?.series_id;
+      if (!sid) {
+        const b = await api.post("/admin/ensure-series", { category_id: cat.category_id, is_free: isFree, series_type: stype });
+        sid = b.series_id;
+      }
+      router.push(`/admin/test-editor?seriesId=${sid}`);
+    } catch (e: any) {
+      toast.show(e.message || "Could not open editor", "error");
+    }
+  };
+
   const selectAndUpload = async () => {
-    if (!bucket.data) return;
     try {
       const res = await DocumentPicker.getDocumentAsync({
         type: ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel", ".xlsx", ".xls"],
@@ -129,7 +141,7 @@ export default function AdminManage() {
                 </Card>
               ) : (
                 <>
-                  <Pressable testID="add-manual" onPress={() => router.push(`/admin/test-editor?seriesId=${bucket.data?.series_id}`)} style={[styles.actBtn, { backgroundColor: colors.brandPrimary }]} disabled={!bucket.data}>
+                  <Pressable testID="add-manual" onPress={addManual} style={[styles.actBtn, { backgroundColor: colors.brandPrimary }]}>
                     <Plus size={18} color={colors.onBrandPrimary} weight="bold" /><Text style={styles.actText}>Add Test Manually</Text>
                   </Pressable>
 
@@ -140,7 +152,7 @@ export default function AdminManage() {
                     </View>
                     <Text style={styles.uploadTitle}>Upload Excel (.xlsx)</Text>
                     <Text style={styles.uploadSub}>Rows with the same Test Name are grouped into one test.</Text>
-                    <Pressable testID="bulk-upload-tagged" onPress={selectAndUpload} style={[styles.uploadBtn, (uploading || !bucket.data) && { opacity: 0.6 }]} disabled={uploading || !bucket.data}>
+                    <Pressable testID="bulk-upload-tagged" onPress={selectAndUpload} style={[styles.uploadBtn, uploading && { opacity: 0.6 }]} disabled={uploading}>
                       <Text style={styles.uploadBtnText}>{uploading ? "Uploading…" : "Select & Upload File"}</Text>
                     </Pressable>
                   </Card>

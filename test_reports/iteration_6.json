@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 6 — Verified the Level-4 button-enabled fix (both 'Add Test Manually' and 'Select & Upload File' are no longer gated by the bucket useQuery loading/retry window). BACKEND: Re-ran /app/backend/tests/test_sample_template_and_upload.py against https://dakmock-exam.preview.emergentagent.com — 7/7 passed (public GET /api/admin/sample-template → 200 xlsx with correct Content-Type/Disposition; POST /api/admin/bulk-upload-tagged → 200 for both gds_mts/true/mock and pa_sa/false/pyq buckets consuming /app/sample_questions.xlsx; anon upload → 401/403). FRONTEND (Playwright, mobile 390x844): logged in admin@dakmock.com/Admin@123, drilled gds_mts → Free → Mock. Within ~30ms of reaching level-4 (no artificial wait): add-manual aria-disabled=None, opacity=1; bulk-upload-tagged aria-disabled=None, opacity=1; bucket-retry card NOT rendered. Tap add-manual → navigates to /admin/test-editor?seriesId=series_27bd1b5695 (ensure-series was called on demand in the handler). Returned to lvl4 — tap bulk-upload-tagged opened the native filechooser; after fc.set_files('/app/sample_questions.xlsx') the upload completed in one step and the manage-test row count rose to 5. Repeated identically in bucket2 (pa_sa → Paid → PYQ): both buttons enabled immediately (~27ms, opacity=1, aria-disabled=None, no retry card), add-manual navigated to /admin/test-editor?seriesId=series_5bae907017, bulk-upload-tagged → filechooser → one-step upload succeeded, list refreshed to 4 rows. Deprecated RN Web warnings (pointerEvents, shadow*) still emitted on manage-screen render — unchanged carry-over from iter 4/5.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "RN Web deprecation (carry-over)", "issue": "'props.pointerEvents is deprecated. Use style.pointerEvents' emitted on every manage-screen render. Move pointerEvents from props to style. Reference: /app/frontend/app/admin/manage.tsx and shared Card/Pressable wrappers."},
+      {"component": "RN Web deprecation (carry-over)", "issue": "'\"shadow*\" style props are deprecated. Use \"boxShadow\".' Replace shadow* in StyleSheet.create blocks with boxShadow. Reference: /app/frontend/app/admin/manage.tsx uploadCard styles."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_sample_template_and_upload.py",
+    "/app/test_reports/pytest/pytest_iteration_6.xml"
+  ],
+  "action_items": [
+    "(Carry-over, cosmetic) Replace deprecated RN Web props: props.pointerEvents → style.pointerEvents, shadow* → boxShadow. No functional impact.",
+    "(Nice-to-have) addManual's on-demand ensure-series call duplicates the queryFn logic from the useQuery. Consider extracting ensureSeries(cat,isFree,stype) into a shared helper so both paths stay in sync if the payload shape changes."
+  ],
+  "critical_code_review_comments": [
+    "manage.tsx line 155: Pressable is `disabled={uploading}` — correct (only disabled during active upload). Good: no longer gated by bucket.isLoading / bucket.data.",
+    "manage.tsx line 55-66: addManual now calls ensure-series on demand when bucket.data?.series_id is undefined — this correctly decouples the button from the useQuery loading window.",
+    "server.py still ~1553 lines — admin/* endpoints should be split into routers for maintainability (ensure-series, bulk-upload-tagged, sample-template, tests CRUD, series CRUD, announcements). Carry-over from iter 5."
+  ],
+  "updated_files": [
+    "/app/test_reports/pytest/pytest_iteration_6.xml",
+    "/app/test_reports/iteration_6.json"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7 — sample-template 4 + bulk-upload parametrized 2 + auth-guard 1)",
+    "frontend": "100% — both buckets (gds_mts/Free/Mock and pa_sa/Paid/PYQ) show add-manual and bulk-upload-tagged enabled (aria-disabled=None, opacity=1) within 30ms of reaching level-4, both tap handlers work (navigation to /admin/test-editor with on-demand ensure-series, and filechooser → one-step upload → list refresh)."
+  },
+  "seed_data_creation": "Playwright uploaded /app/sample_questions.xlsx into gds_mts/Free/Mock (manage-test row count = 5 after upload) and pa_sa/Paid/PYQ (row count = 4). Backend pytest also created series+tests via POST /admin/bulk-upload-tagged for the same two buckets. Main agent may want to purge TEST data if the production MongoDB is shared.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Fix for iteration 6 confirmed: /app/frontend/app/admin/manage.tsx lines 55-66 (addManual with on-demand ensure-series) and 155 (Pressable disabled={uploading} only) are correct. Both buttons remain enabled immediately on reaching level-4 regardless of bucket.useQuery state. Login testIDs: input-email, input-password, submit-auth (NOT email-input/password-input/login-submit). Manage screen testIDs: manage-back, lvl1-{gds_mts|postman_mailguard|pa_sa}, lvl2-{true|false}, lvl3-{mock|pyq}, add-manual, bulk-upload-tagged, download-template, bucket-retry (only on bucket.isError), manage-test-{test_id}. Backend tests at /app/backend/tests/test_sample_template_and_upload.py — set EXPO_PUBLIC_BACKEND_URL env var before pytest.",
+  "rca_of_issue": "No new bugs. The previously-reported bug (both lvl4 buttons faded/disabled during bucket query loading/retry window) is confirmed fixed in /app/frontend/app/admin/manage.tsx: (1) add-manual Pressable no longer references bucket.data in its render and calls ensure-series inside its onPress handler on demand; (2) bulk-upload-tagged Pressable's disabled prop is `uploading` only (not bucket.isLoading or !bucket.data). Verified both buttons have aria-disabled=None and opacity=1 within ~30ms of reaching level-4 in two distinct buckets. Only remaining items are cosmetic RN Web deprecation warnings carried over from prior iterations."
+}
