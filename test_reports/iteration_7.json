@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 7 — Verified all 3 .xlsx parser/exam-screen bug fixes end-to-end against /app/messy_test.xlsx (Test Name on row 1 only, Option A/B/C/D headers without (EN), one 2-option row). BACKEND (/app/backend/tests/test_messy_parser.py, 5/5 PASSED against https://dakmock-exam.preview.emergentagent.com): POST /api/admin/bulk-upload-tagged with messy_test.xlsx returns ok=true, series_id=series_27bd1b5695, tests_created=1, questions_created=4 — proving BUG1 forward-fill of 'Test Name' across the blank-cell rows. GET /api/admin/test-series/{sid}/tests → finds exactly 1 'Messy Mock A' from this upload. GET /api/tests/test_9378a287f6?practice=true returns all 4 questions with options_en: ['Delhi','Mumbai','Kolkata','Chennai'], ['3','4','5','6'], ['Yes','No','',''], ['Earth','Jupiter','Mars','Venus'] and correct_index 0,1,0,1 — proving BUG2 that Option A/B/C/D headers (no (EN) suffix) are read into all 4 slots and that a 2-option row produces ['opt1','opt2','',''] (empty strings, no crash). Regression: POST /api/tests/{tid}/submit returned attempt_id with correct answers mapped. FRONTEND (Playwright, mobile 390x844): logged in admin@dakmock.com/Admin@123, opened /exam/test_9378a287f6?mode=practice. Q1 renders 4 option tiles (option-0..3 all visible), question header at y=82, option-0 at y=142 (gap 44px — compact), option-3 bottom at y=442 — all 4 options fit comfortably in the 844px viewport without scrolling (BUG3 verified). Navigated to Q3 via palette: only option-0 (Yes) and option-1 (No) rendered; option-2 and option-3 DOM count = 0 (no blank boxes). Tapping option-0 produced the green 'Correct!' feedback — proving BUG2 frontend index alignment is preserved (correct_index=0 → first non-empty option). Tapping Q2 option-1 also produced 'Correct!' confirming regular scoring. Admin test-editor at /admin/test-editor?testId=test_9378a287f6 loads unchanged — Edit Test screen shows '4 question(s)', Test Title='Messy Mock A', 39 inputs including 4 options per question with EN+HI inputs (regression intact). RN Web deprecation warnings (pointerEvents, shadow*) still emitted — carry-over from iters 4–6, unchanged, not part of this task.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "RN Web deprecation (carry-over)", "issue": "'props.pointerEvents is deprecated. Use style.pointerEvents' logged on exam and admin screens. Carry-over from iter 4–6. Reference: /app/frontend/app/exam/[id].tsx and shared Pressable wrappers."},
+      {"component": "RN Web deprecation (carry-over)", "issue": "'\"shadow*\" style props are deprecated. Use \"boxShadow\".' Reference: /app/frontend/app/exam/[id].tsx bottomBar styles (lines 487-502) + other screens."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_messy_parser.py",
+    "/app/test_reports/pytest/pytest_messy_parser.xml"
+  ],
+  "action_items": [
+    "(Carry-over, cosmetic) Replace RN Web deprecated props: props.pointerEvents → style.pointerEvents, shadow* → boxShadow. Not blocking this task."
+  ],
+  "critical_code_review_comments": [
+    "server.py:1417 — _col() tolerantly matches 'Test Name', 'Test', 'test_name', 'Mock Test', 'Paper Name'; forward-fill of last_test_name correctly carries name across blank cells. Good.",
+    "server.py:1426-1431 — opts_en now tries 'Option X (EN)', 'Option X', 'Option N', 'OptionX', 'X', 'Opt X', 'Opt N' per slot. _col() returns '' for blank cells, so a 2-option row yields ['opt1','opt2','',''] — matches expected shape.",
+    "server.py:1458-1459 — correct_index is clamped to 0 if out of range; letter_map maps 'A'→0,'B'→1,'C'→2,'D'→3 safely.",
+    "server.py:1438-1442 — row is skipped only when BOTH question_text AND all opts_en are empty, protecting against truly blank Excel rows while still forward-filling test name.",
+    "exam/[id].tsx:275-304 — opts.map renders Pressable only when `String(o).trim() !== ''`; the key uses the original index `i`, so correct_index alignment is preserved when C/D are empty. Verified visually and via scoring in Playwright run.",
+    "exam/[id].tsx:263-266 — ScrollView padding spacing.xl (16-24px) + optionsWrap gap spacing.md keeps 4 options comfortably within 390x844 viewport (opt3 bottom y=442). No excess spacing detected.",
+    "server.py is now ~1596 lines — carry-over suggestion to split admin/* endpoints into routers. Not required for this bug-fix task."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_messy_parser.py",
+    "/app/test_reports/pytest/pytest_messy_parser.xml",
+    "/app/test_reports/iteration_7.json"
+  ],
+  "success_rate": {
+    "backend": "100% (5/5 — bug1 forward-fill: 2, bug2 option parsing: 2, submit regression: 1)",
+    "frontend": "100% — exam screen renders 4 options for full-option questions compactly; renders only 2 non-empty options for Q3 with no blank boxes; selecting Yes on Q3 scores Correct (index alignment preserved); admin test-editor loads unchanged with all option inputs intact."
+  },
+  "seed_data_creation": "The 'Messy Mock A' test used by the fixture is test_9378a287f6 (series_27bd1b5695, gds_mts/Free/Mock). The pytest module (test_messy_parser.py) also re-uploads /app/messy_test.xlsx on each run, creating additional 'Messy Mock A' tests in the same series (currently 3 duplicates exist). Main agent may want to add a cleanup fixture or dedupe step if desired, but it does not affect correctness.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All 3 bugs are confirmed fixed. The ready-made Messy Mock A test id is test_9378a287f6 under series_27bd1b5695 (gds_mts/Free/Mock). To re-run backend tests: EXPO_PUBLIC_BACKEND_URL=https://dakmock-exam.preview.emergentagent.com pytest /app/backend/tests/test_messy_parser.py -v. Admin login endpoint returns {session_token, user} — use session_token as Bearer. Exam screen testIDs: option-0..3 (Pressable), open-palette, palette-q-{i}, save-next, submit-exam, mark-review, clear-ans, lang-en/hi. The exam screen correctly skips empty option strings via `String(o).trim() === '' → return null` while preserving the original index as React key, so correct_index alignment with the backend data is maintained.",
+  "rca_of_issue": "All 3 bugs reported in the review request are fixed. BUG1 RCA: parser previously had `if not test_name: continue` which dropped every row where admins only typed the test name on the first row of a group — fix at server.py:1417-1421 remembers last_test_name and forward-fills, so all 4 non-empty rows in messy_test.xlsx now group under one test (questions_created=4, tests_created=1). BUG2 RCA: original _col calls only knew 'Option X (EN)' header → without the (EN) suffix, options_en for slots A-D were all empty; fix at server.py:1426-1431 adds tolerant header variants and _normkey() strips case/underscores/hyphens — now Option A/B/C/D (no (EN)) are read correctly. For partially-filled rows, _col returns '' instead of raising, keeping the options_en list at length 4. BUG2 frontend fail-safe RCA: exam/[id].tsx:278 skips rendering a Pressable when `String(o).trim() === ''`, and crucially uses `key={i}` (original index) and passes `i` to the select callback → correct_index comparisons remain accurate even when C/D are missing. BUG3 RCA: the current layout (ScrollView padding spacing.xl + optionsWrap gap spacing.md + option padding spacing.lg) keeps all 4 options visible in a 390x844 viewport (opt3 bottom at y=442, well above 844). No excess spacing observed. Admin test-editor renders unchanged (verified via screenshot and 39 input count)."
+}

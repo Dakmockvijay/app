@@ -1059,10 +1059,20 @@ async def sample_template():
     )
 
 
+def _normkey(k) -> str:
+    # Normalise a header for tolerant matching: lowercase, trim, collapse spaces,
+    # treat _ and - as spaces so "Option_A", "option a", "OPTION A" all match.
+    return " ".join(str(k).strip().lower().replace("_", " ").replace("-", " ").split())
+
+
 def _col(row, *names):
+    norm_row = {_normkey(k): v for k, v in row.items()}
     for n in names:
-        if n in row and pd.notna(row[n]):
-            return str(row[n]).strip()
+        key = _normkey(n)
+        if key in norm_row and pd.notna(norm_row[key]):
+            val = str(norm_row[key]).strip()
+            if val != "":
+                return val
     return ""
 
 
@@ -1397,36 +1407,69 @@ async def bulk_upload_tagged(
     sid = await ensure_series(category_id, is_free.lower() == "true", series_type)
     letter_map = {"A": 0, "B": 1, "C": 2, "D": 3}
     grouped: Dict[str, Dict[str, Any]] = {}
+    last_test_name = ""
+    last_paper = ""
+    last_duration = 30
     for _, row in df.iterrows():
         r = {k: row[k] for k in df.columns}
-        test_name = _col(r, "Test Name", "Test", "test_name")
+        # Bug 1 fix: inherit Test Name from the previous row when the cell is blank
+        # (common when admins only type the test name on the first question row).
+        test_name = _col(r, "Test Name", "Test", "test_name", "Mock Test", "Paper Name")
+        if test_name:
+            last_test_name = test_name
+        else:
+            test_name = last_test_name
+
+        question_text = _col(r, "Question Text (EN)", "Question (EN)", "Question Text", "Question", "Q", "Ques")
+        question_hi = _col(r, "Question Text (HI)", "Question (HI)", "Question Hindi")
+        # Bug 2 fix: read all four option columns tolerantly (many header variants).
+        opts_en = [
+            _col(r, "Option A (EN)", "Option A", "Option 1", "OptionA", "A", "Opt A", "Opt1"),
+            _col(r, "Option B (EN)", "Option B", "Option 2", "OptionB", "B", "Opt B", "Opt2"),
+            _col(r, "Option C (EN)", "Option C", "Option 3", "OptionC", "C", "Opt C", "Opt3"),
+            _col(r, "Option D (EN)", "Option D", "Option 4", "OptionD", "D", "Opt D", "Opt4"),
+        ]
+        opts_hi = [
+            _col(r, "Option A (HI)", "Option A Hindi", "Option 1 (HI)"),
+            _col(r, "Option B (HI)", "Option B Hindi", "Option 2 (HI)"),
+            _col(r, "Option C (HI)", "Option C Hindi", "Option 3 (HI)"),
+            _col(r, "Option D (HI)", "Option D Hindi", "Option 4 (HI)"),
+        ]
+        # Skip only genuinely empty rows (no question text and no options).
+        if not question_text and not any(opts_en):
+            continue
         if not test_name:
             continue
+
         try:
-            duration = int(float(_col(r, "Time Limit (min)", "Time Limit", "Duration") or 30))
+            duration = int(float(_col(r, "Time Limit (min)", "Time Limit", "Duration") or last_duration))
         except Exception:
-            duration = 30
+            duration = last_duration
+        last_duration = duration
         try:
             marks = float(_col(r, "Marks", "Mark") or 1)
         except Exception:
             marks = 1.0
-        correct_raw = _col(r, "Correct Answer", "Answer", "Correct").upper()
+        correct_raw = _col(r, "Correct Answer", "Answer", "Correct", "Ans", "Correct Option").upper()
         correct_index = letter_map.get(correct_raw, 0)
         if correct_raw.isdigit():
             correct_index = max(0, int(correct_raw) - 1)
-        opts_en = [_col(r, "Option A (EN)", "Option A"), _col(r, "Option B (EN)", "Option B"),
-                   _col(r, "Option C (EN)", "Option C"), _col(r, "Option D (EN)", "Option D")]
-        opts_hi = [_col(r, "Option A (HI)"), _col(r, "Option B (HI)"),
-                   _col(r, "Option C (HI)"), _col(r, "Option D (HI)")]
+        # Fail-safe: keep correct_index within the number of options.
+        if correct_index >= len(opts_en) or correct_index < 0:
+            correct_index = 0
         q = {
-            "question_en": _col(r, "Question Text (EN)", "Question Text", "Question"),
-            "question_hi": _col(r, "Question Text (HI)"),
+            "question_en": question_text,
+            "question_hi": question_hi,
             "options_en": opts_en, "options_hi": opts_hi if any(opts_hi) else [],
             "correct_index": correct_index,
-            "explanation_en": _col(r, "Explanation (EN)", "Explanation"),
-            "explanation_hi": _col(r, "Explanation (HI)"), "marks": marks,
+            "explanation_en": _col(r, "Explanation (EN)", "Explanation", "Solution"),
+            "explanation_hi": _col(r, "Explanation (HI)", "Explanation Hindi"), "marks": marks,
         }
         paper = _col(r, "Paper", "Paper No")
+        if paper:
+            last_paper = paper
+        else:
+            paper = last_paper
         key = f"{test_name}|{paper}"
         if key not in grouped:
             grouped[key] = {"test_name": test_name, "paper": paper, "duration": duration, "questions": []}

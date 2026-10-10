@@ -271,8 +271,11 @@ export default function Exam() {
         </View>
         <Text style={styles.qText}>{qtext}</Text>
 
-        <View style={{ gap: spacing.md, marginTop: spacing.lg }}>
+        <View style={styles.optionsWrap}>
           {opts.map((o, i) => {
+            // Bug 2 fail-safe: skip blank options but keep the original index so
+            // selection/answer mapping and correct_index stay aligned.
+            if (o === null || o === undefined || String(o).trim() === "") return null;
             const sel = answers[current] === i;
             const isCorrect = revealed && i === correctIdx;
             const isWrongPick = revealed && sel && i !== correctIdx;
@@ -451,7 +454,8 @@ const useStyles = makeStyles((colors) => ({
   qNumRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   qNum: { color: colors.muted, fontSize: fontSize.base, fontWeight: "700" },
   qMarks: { color: colors.success, fontSize: fontSize.sm, fontWeight: "800" },
-  qText: { color: colors.onSurface, fontSize: fontSize.lg, fontWeight: "700", marginTop: spacing.sm, lineHeight: 26 },
+  qText: { color: colors.onSurface, fontSize: fontSize.lg, fontWeight: "700", marginTop: spacing.sm, lineHeight: 24 },
+  optionsWrap: { gap: spacing.md, marginTop: spacing.md },
   option: {
     flexDirection: "row",
     alignItems: "center",
