@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { Image, Platform, Pressable, Text, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Plus, Trash, CheckCircle, FloppyDisk } from "phosphor-react-native";
+import * as DocumentPicker from "expo-document-picker";
+import { Plus, Trash, CheckCircle, FloppyDisk, Image as ImageIcon, X, ArrowsClockwise } from "phosphor-react-native";
 
 import { api } from "@/src/api";
 import { queryClient } from "@/src/query-client";
@@ -21,12 +22,18 @@ type Q = {
   explanation_en: string;
   explanation_hi: string;
   marks: number;
+  question_image_en: string;
+  question_image_hi: string;
+  option_images_en: string[];
+  option_images_hi: string[];
 };
 
 const blankQ = (): Q => ({
   question_en: "", question_hi: "",
   options_en: ["", "", "", ""], options_hi: ["", "", "", ""],
   correct_index: 0, explanation_en: "", explanation_hi: "", marks: 1,
+  question_image_en: "", question_image_hi: "",
+  option_images_en: ["", "", "", ""], option_images_hi: ["", "", "", ""],
 });
 
 export default function TestEditor() {
@@ -59,6 +66,9 @@ export default function TestEditor() {
           correct_index: q.correct_index ?? 0,
           explanation_en: q.explanation_en || "", explanation_hi: q.explanation_hi || "",
           marks: q.marks ?? 1,
+          question_image_en: q.question_image_en || "", question_image_hi: q.question_image_hi || "",
+          option_images_en: [0, 1, 2, 3].map((i) => q.option_images_en?.[i] || ""),
+          option_images_hi: [0, 1, 2, 3].map((i) => q.option_images_hi?.[i] || ""),
         })));
       } catch (e: any) { toast.show(e.message, "error"); }
       finally { setLoading(false); }
@@ -77,12 +87,97 @@ export default function TestEditor() {
       return { ...q, [key]: arr };
     }));
 
+  const patchOptImg = (qi: number, oi: number, lang: "en" | "hi", url: string) =>
+    setQuestions((qs) => qs.map((q, i) => {
+      if (i !== qi) return q;
+      const key = lang === "en" ? "option_images_en" : "option_images_hi";
+      const arr = [...(q as any)[key]];
+      while (arr.length < 4) arr.push("");
+      arr[oi] = url;
+      return { ...q, [key]: arr };
+    }));
+
+  // Which field should receive a pasted image (last focused). Returns a setter.
+  const focusedRef = useRef<((url: string) => void) | null>(null);
+
+  const uploadAsset = async (asset: any): Promise<string> => {
+    const form = new FormData();
+    if (Platform.OS === "web" && asset.file) form.append("file", asset.file);
+    else form.append("file", { uri: asset.uri, name: asset.name || "img.png", type: asset.mimeType || "image/png" } as any);
+    const out = await api.uploadFile("/admin/upload-image", form);
+    return out.url as string;
+  };
+
+  const pickAndApply = async (apply: (url: string) => void) => {
+    try {
+      const res = await DocumentPicker.getDocumentAsync({ type: ["image/*"], copyToCacheDirectory: true, multiple: false });
+      if (res.canceled || !res.assets?.length) return;
+      const url = await uploadAsset(res.assets[0]);
+      apply(url);
+      toast.show("Image attached", "success");
+    } catch (e: any) { toast.show(e.message || "Upload failed", "error"); }
+  };
+
+  // Web: intercept clipboard paste; if an image is on the clipboard, upload it
+  // and attach to the last-focused field.
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    const handler = async (e: any) => {
+      const apply = focusedRef.current;
+      if (!apply) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const it of items) {
+        if (it.type && it.type.startsWith("image/")) {
+          const blob = it.getAsFile();
+          if (!blob) continue;
+          e.preventDefault();
+          try {
+            const form = new FormData();
+            form.append("file", blob, `paste.${(it.type.split("/")[1] || "png")}`);
+            const out = await api.uploadFile("/admin/upload-image", form);
+            apply(out.url);
+            toast.show("Image pasted & attached", "success");
+          } catch (err: any) { toast.show(err.message || "Paste upload failed", "error"); }
+          break;
+        }
+      }
+    };
+    window.addEventListener("paste", handler);
+    return () => window.removeEventListener("paste", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const renderImageAttach = (url: string, onChange: (u: string) => void, tid: string) => (
+    url ? (
+      <View style={styles.imgPreviewWrap}>
+        <Image source={{ uri: api.baseUrl + url }} style={styles.imgPreview} resizeMode="contain" />
+        <View style={styles.imgActions}>
+          <Pressable testID={`${tid}-replace`} onPress={() => pickAndApply(onChange)} style={styles.imgBtn}>
+            <ArrowsClockwise size={14} color={colors.brandPrimary} weight="bold" /><Text style={styles.imgBtnText}>Replace</Text>
+          </Pressable>
+          <Pressable testID={`${tid}-remove`} onPress={() => onChange("")} style={styles.imgBtnDel}>
+            <X size={14} color={colors.error} weight="bold" /><Text style={styles.imgBtnDelText}>Remove</Text>
+          </Pressable>
+        </View>
+      </View>
+    ) : (
+      <Pressable testID={`${tid}-add`} onPress={() => pickAndApply(onChange)} style={styles.imgAddBtn}>
+        <ImageIcon size={16} color={colors.muted} weight="bold" />
+        <Text style={styles.imgAddText}>{Platform.OS === "web" ? "Add image (or focus & paste Ctrl+V)" : "Add image"}</Text>
+      </Pressable>
+    )
+  );
+
   const save = async () => {
     if (!title.trim()) { toast.show("Enter a test title", "error"); return; }
-    const clean = questions.filter((q) => q.question_en.trim() && q.options_en.some((o) => o.trim()));
+    const hasQ = (q: Q) => q.question_en.trim() || q.question_image_en;
+    const optFilled = (q: Q) => q.options_en.some((o, i) => o.trim() || q.option_images_en[i]);
+    const clean = questions.filter((q) => hasQ(q) && optFilled(q));
     if (clean.length === 0) { toast.show("Add at least one question with options", "error"); return; }
     for (const q of clean) {
-      if (q.options_en.filter((o) => o.trim()).length < 2) {
+      const filled = q.options_en.filter((o, i) => o.trim() || q.option_images_en[i]).length;
+      if (filled < 2) {
         toast.show("Each question needs at least 2 options", "error");
         return;
       }
@@ -143,8 +238,10 @@ export default function TestEditor() {
                   </Pressable>
                 )}
               </View>
-              <Field label="Question (English)" value={q.question_en} onChangeText={(v) => patchQ(qi, { question_en: v })} placeholder="Question text" multiline testID={`q-en-${qi}`} />
-              <Field label="Question (Hindi)" value={q.question_hi} onChangeText={(v) => patchQ(qi, { question_hi: v })} placeholder="प्रश्न (वैकल्पिक)" multiline testID={`q-hi-${qi}`} />
+              <Field label="Question (English)" value={q.question_en} onChangeText={(v) => patchQ(qi, { question_en: v })} onFocus={() => { focusedRef.current = (u) => patchQ(qi, { question_image_en: u }); }} placeholder="Question text" multiline testID={`q-en-${qi}`} />
+              {renderImageAttach(q.question_image_en, (u) => patchQ(qi, { question_image_en: u }), `qimg-en-${qi}`)}
+              <Field label="Question (Hindi)" value={q.question_hi} onChangeText={(v) => patchQ(qi, { question_hi: v })} onFocus={() => { focusedRef.current = (u) => patchQ(qi, { question_image_hi: u }); }} placeholder="प्रश्न (वैकल्पिक)" multiline testID={`q-hi-${qi}`} />
+              {renderImageAttach(q.question_image_hi, (u) => patchQ(qi, { question_image_hi: u }), `qimg-hi-${qi}`)}
 
               <Text style={styles.optLabel}>Options — tap the letter to mark the correct answer</Text>
               {[0, 1, 2, 3].map((oi) => {
@@ -155,8 +252,10 @@ export default function TestEditor() {
                       {correct ? <CheckCircle size={18} color={colors.onSuccess} weight="fill" /> : <Text style={styles.letterText}>{String.fromCharCode(65 + oi)}</Text>}
                     </Pressable>
                     <View style={{ flex: 1, gap: 6 }}>
-                      <Field value={q.options_en[oi]} onChangeText={(v) => patchOpt(qi, oi, "en", v)} placeholder={`Option ${String.fromCharCode(65 + oi)} (EN)`} testID={`opt-en-${qi}-${oi}`} style={styles.optInput} />
-                      <Field value={q.options_hi[oi]} onChangeText={(v) => patchOpt(qi, oi, "hi", v)} placeholder={`विकल्प ${String.fromCharCode(65 + oi)} (HI)`} testID={`opt-hi-${qi}-${oi}`} style={styles.optInput} />
+                      <Field value={q.options_en[oi]} onChangeText={(v) => patchOpt(qi, oi, "en", v)} onFocus={() => { focusedRef.current = (u) => patchOptImg(qi, oi, "en", u); }} placeholder={`Option ${String.fromCharCode(65 + oi)} (EN)`} testID={`opt-en-${qi}-${oi}`} style={styles.optInput} />
+                      {renderImageAttach(q.option_images_en[oi], (u) => patchOptImg(qi, oi, "en", u), `optimg-en-${qi}-${oi}`)}
+                      <Field value={q.options_hi[oi]} onChangeText={(v) => patchOpt(qi, oi, "hi", v)} onFocus={() => { focusedRef.current = (u) => patchOptImg(qi, oi, "hi", u); }} placeholder={`विकल्प ${String.fromCharCode(65 + oi)} (HI)`} testID={`opt-hi-${qi}-${oi}`} style={styles.optInput} />
+                      {renderImageAttach(q.option_images_hi[oi], (u) => patchOptImg(qi, oi, "hi", u), `optimg-hi-${qi}-${oi}`)}
                     </View>
                   </View>
                 );
@@ -194,6 +293,15 @@ const useStyles = makeStyles((colors) => ({
   letterCorrect: { backgroundColor: colors.success, borderColor: colors.success },
   letterText: { fontWeight: "800", color: colors.onSurfaceSecondary },
   optInput: { minHeight: 44, marginBottom: 0 },
+  imgAddBtn: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", paddingHorizontal: spacing.sm, paddingVertical: 6, borderRadius: radius.sm, borderWidth: 1, borderStyle: "dashed", borderColor: colors.border, marginBottom: spacing.sm },
+  imgAddText: { color: colors.muted, fontSize: fontSize.sm, fontWeight: "600" },
+  imgPreviewWrap: { marginBottom: spacing.sm, gap: 6 },
+  imgPreview: { width: "100%", height: 150, borderRadius: radius.sm, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border },
+  imgActions: { flexDirection: "row", gap: spacing.sm },
+  imgBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.brandPrimary },
+  imgBtnText: { color: colors.brandPrimary, fontSize: fontSize.sm, fontWeight: "700" },
+  imgBtnDel: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.error },
+  imgBtnDelText: { color: colors.error, fontSize: fontSize.sm, fontWeight: "700" },
   addQ: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, paddingVertical: spacing.md, borderRadius: radius.md, borderWidth: 1.5, borderStyle: "dashed", borderColor: colors.brandPrimary },
   addQText: { color: colors.brandPrimary, fontWeight: "800", fontSize: fontSize.base },
 }));

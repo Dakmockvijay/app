@@ -1,0 +1,31 @@
+{
+  "summary": "Both backend and frontend tested for the new IMAGE attachment feature in the admin test editor. Backend: 11/11 pytest tests passed in 25.9s covering POST /api/admin/upload-image (auth, non-admin forbidden, empty file 400, happy path returning {image_id,url}), GET /api/files/{id} (public streaming + 404 unknown), full persistence round-trip through POST /api/admin/tests -> GET /api/admin/tests/{id} and GET /api/tests/{id}?practice=true (question_image_en/hi + option_images_en/hi returned byte-identical), image-only option accepted, bulk-upload-tagged regression intact, no-image question regression intact, and submit scoring correct for an image-containing question. Frontend: logged in as admin, loaded /admin/test-editor?testId=test_5380a0a225 (seeded 'Image Demo Test'), confirmed all required testIDs (qimg-en-0-replace/remove, qimg-hi-0-add, optimg-en-0-0-replace/remove, optimg-hi-0-0-add, save-test, add-question). File-pick upload path verified via Playwright file chooser: uploading a 4x4 green PNG into qimg-hi-0 flipped the field from 'Add image' to Replace+Remove with preview rendered; clicking Remove restored 'Add image'. Student exam at /exam/test_5380a0a225 rendered question-image under the question and option-image-0 inside option A (text 'Red' + red image), option-1 showed only text 'Blue', options C/D were correctly SKIPPED (neither text nor image). Selecting option A and submitting scored 1/1 (100% accuracy) and routed to /results/att_... All image-related features work end to end. Clipboard paste (web-only enhancement) was NOT exercised in Playwright (as explicitly allowed by the request); the paste handler is wired in test-editor.tsx:123-149 and attaches to the last-focused field via focusedRef.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_image_attachments.py",
+    "/app/test_reports/pytest/pytest_image_attachments.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py now at 1689 lines (grew by ~90 for image routes). Still over the 700-line soft limit — splitting into routers/{images,admin_tests,bulk_upload}.py is a nice-to-have cleanup for next iteration.",
+    "exam/[id].tsx:189 — optImg fallback (lang=='hi' empty -> fallback to option_images_en[i]) is correct and matches question-image fallback at line 187. Nice symmetry.",
+    "admin/test-editor.tsx:174-184 — hasQ() and optFilled() correctly accept 'option considered filled if text OR image', aligning with the student renderer that skips options only when both are empty.",
+    "upload-image uses await file.read() of the whole payload before size check — fine for the 6MB cap but if the cap is ever raised, consider streaming or reading up to limit+1 to short-circuit DoS. Not blocking.",
+    "No MIME-sniffing beyond extension; a malicious .png actually containing non-image bytes would be stored and served with 'image/*' content-type. Low risk since route is admin-only, flagging only."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_image_attachments.py"
+  ],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "100% of critical flows (editor load, upload, preview, remove, exam render, scoring)"},
+  "seed_data_creation": "4 tests created during pytest run under gds_mts free Mock series (3 via /admin/tests + 1 via /admin/bulk-upload-tagged); ALL deleted via DELETE /admin/tests/{tid} in module teardown. Verified post-run: 0 TEST_* leftovers in gds_mts free Mock series. One image was uploaded via the upload-image route (not deleted - no delete endpoint exists; it is just a stored blob and not expensive). One attempt row for att_3d18972226af was created by the frontend scoring verification; attempts are per-user history and expected to persist.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Public base URL env var is EXPO_PUBLIC_BACKEND_URL (NOT EXPO_BACKEND_URL). Login returns 'session_token' (not 'token'). Seeded admin: admin@dakmock.com / Admin@123. Seeded image-attached test: test_5380a0a225 under free gds_mts Mock series. Public image URL /api/files/3e34f06965c74dfb8c8b35fb17ee3dd8 serves image/png. The admin Login page has 2 'Login' texts (tab + submit) — click .nth(1) or use the actual submit button inside the Login form. There is NO /admin/images/{id} delete endpoint; stored blobs persist by design. Clipboard paste in test-editor is web-only (window 'paste' listener) and not easily automated via Playwright — verifying file-pick path is sufficient.",
+  "rca_of_issue": "N/A — new feature verification, no bug encountered."
+}

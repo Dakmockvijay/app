@@ -45,6 +45,49 @@ def iso(dt: datetime) -> str:
     return dt.isoformat()
 
 
+# ----------------------------- Object Storage (images) ----------------------
+STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
+STORAGE_URL = STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
+EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
+APP_NAME = "dakmock"
+_storage_key: Optional[str] = None
+
+
+async def _init_storage(force: bool = False) -> str:
+    global _storage_key
+    if _storage_key and not force:
+        return _storage_key
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await c.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY})
+        r.raise_for_status()
+        _storage_key = r.json()["storage_key"]
+    return _storage_key
+
+
+async def storage_put(path: str, data: bytes, content_type: str) -> Dict[str, Any]:
+    key = await _init_storage()
+    async with httpx.AsyncClient(timeout=120) as c:
+        r = await c.put(f"{STORAGE_URL}/objects/{path}",
+                        headers={"X-Storage-Key": key, "Content-Type": content_type}, content=data)
+        if r.status_code == 503:  # stale key -> re-init once
+            key = await _init_storage(force=True)
+            r = await c.put(f"{STORAGE_URL}/objects/{path}",
+                            headers={"X-Storage-Key": key, "Content-Type": content_type}, content=data)
+        r.raise_for_status()
+        return r.json()
+
+
+async def storage_get(path: str):
+    key = await _init_storage()
+    async with httpx.AsyncClient(timeout=60) as c:
+        r = await c.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key})
+        if r.status_code == 503:
+            key = await _init_storage(force=True)
+            r = await c.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key})
+        r.raise_for_status()
+        return r.content, r.headers.get("Content-Type", "application/octet-stream")
+
+
 # ----------------------------- Models ---------------------------------------
 PyObjectId = Annotated[str, BeforeValidator(str)]
 
@@ -129,6 +172,11 @@ class QuestionIn(BaseModel):
     explanation_en: str = ""
     explanation_hi: str = ""
     marks: float = 1.0
+    # Optional image attachments (relative /api/files/{id} URLs). Empty string = none.
+    question_image_en: str = ""
+    question_image_hi: str = ""
+    option_images_en: List[str] = []
+    option_images_hi: List[str] = []
 
 
 class TestIn(BaseModel):
@@ -481,6 +529,10 @@ async def get_test(test_id: str, practice: bool = False, user: Dict[str, Any] = 
             "question_hi": q.get("question_hi", ""),
             "options_en": q["options_en"],
             "options_hi": q.get("options_hi", []),
+            "question_image_en": q.get("question_image_en", ""),
+            "question_image_hi": q.get("question_image_hi", ""),
+            "option_images_en": q.get("option_images_en", []),
+            "option_images_hi": q.get("option_images_hi", []),
             "marks": q.get("marks", 1),
         }
         if practice:
@@ -1275,6 +1327,46 @@ async def admin_update_test(tid: str, body: AdminTestUpdateIn, _: Dict[str, Any]
 async def admin_delete_test(tid: str, _: Dict[str, Any] = Depends(require_admin)):
     await db.tests.update_one({"test_id": tid}, {"$set": {"deleted_at": now()}})
     return {"ok": True}
+
+
+# ----------------------------- Images (upload + serve) ----------------------
+@api.post("/admin/upload-image")
+async def admin_upload_image(file: UploadFile = File(...), admin: Dict[str, Any] = Depends(require_admin)):
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > 6 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image too large (max 6MB)")
+    ext = (file.filename or "img.png").rsplit(".", 1)[-1].lower()
+    if ext not in ("png", "jpg", "jpeg", "webp", "gif"):
+        ext = "png"
+    image_id = uuid.uuid4().hex
+    path = f"{APP_NAME}/uploads/{admin['user_id']}/{image_id}.{ext}"
+    ct = file.content_type or "image/png"
+    try:
+        await storage_put(path, data, ct)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 402:
+            raise HTTPException(status_code=402, detail="Storage quota exhausted. Add balance to continue uploads.")
+        raise HTTPException(status_code=502, detail="Image upload failed")
+    await db.images.insert_one({
+        "image_id": image_id, "path": path, "content_type": ct,
+        "owner_id": admin["user_id"], "created_at": now(),
+    })
+    return {"image_id": image_id, "url": f"/api/files/{image_id}"}
+
+
+@api.get("/files/{image_id}")
+async def serve_image(image_id: str):
+    img = await db.images.find_one({"image_id": image_id}, {"_id": 0})
+    if not img:
+        raise HTTPException(status_code=404, detail="Image not found")
+    try:
+        content, ct = await storage_get(img["path"])
+    except Exception:
+        raise HTTPException(status_code=404, detail="Image not available")
+    return StreamingResponse(BytesIO(content), media_type=ct,
+                             headers={"Cache-Control": "public, max-age=604800"})
 
 
 # ----------------------------- Admin: Single user ---------------------------
