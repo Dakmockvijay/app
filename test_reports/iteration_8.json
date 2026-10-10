@@ -1,0 +1,23 @@
+{
+  "summary": "Backend-only regression for the DakMock .xlsx header-whitespace bug. New pytest suite backend/tests/test_messy_headers_parser.py (6 tests) uploads an xlsx with the user's EXACT mixed-spacing headers ('Option A (EN)', 'Option B (EN)', 'Option C(EN)', 'Option D(EN)', 'Option A(HI)', 'Option B (HI)', 'Option C(HI)', 'Option D(HI)'), then fetches the created test via GET /api/tests/{id}?practice=true and asserts all 4 EN and all 4 HI options are non-empty. Also covers forward-fill of blank Test Name, Correct Answer letter mapping (A->0, B->1, C->2, D->3) and a regression on fully-spaced headers. All 6 tests passed in 26.17s. All created test rows were deleted via DELETE /api/admin/tests/{tid} at teardown — verified zero leftover TEST_* tests in the gds_mts/is_free/mock series.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": [], "react_native_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_messy_headers_parser.py",
+    "/app/test_reports/pytest/iter8_messy_headers.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "_normkey() correctly uses ''.join(s.split()) which strips ALL whitespace (internal and leading/trailing), so 'Option C (EN)', 'Option C(EN)', 'option_c(en)' and 'OPTION  C ( EN )' all collide to the same key — fix is minimal and correct.",
+    "server.py is 1597 lines — approaching the 700-line soft limit; main agent may want to split admin and bulk-upload routes into their own module eventually (not blocking)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_messy_headers_parser.py"
+  ],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "6 test rows created during the run under series (gds_mts/is_free=true/mock); ALL deleted via admin DELETE at module teardown. Verified post-run: 0 TEST_* leftovers.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login returns token under key 'session_token' (not 'token'). Public base URL env var in this repo is EXPO_PUBLIC_BACKEND_URL (not EXPO_BACKEND_URL as stated in the request). Admin bulk-upload-tagged accepts category_id/is_free/series_type as multipart form fields. Use /admin/test-series/{sid}/tests to find a newly-created test by title.",
+  "rca_of_issue": "Root cause: original _normkey() only lower-cased and swapped _/-; it did NOT strip internal whitespace, so 'Option C (EN)' and 'Option C(EN)' hashed to different keys. _col() therefore missed C/D (and all HI) when the admin's file mixed spacing. Fix: _normkey now does ''.join(s.split()) which collapses all whitespace, making both header styles identical. Validated end-to-end: upload + GET /tests/{id}?practice=true returns options_en = ['Mumbai','Kolkata','New Delhi','Chennai'] and full HI array."
+}

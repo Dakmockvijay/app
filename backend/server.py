@@ -1060,9 +1060,10 @@ async def sample_template():
 
 
 def _normkey(k) -> str:
-    # Normalise a header for tolerant matching: lowercase, trim, collapse spaces,
-    # treat _ and - as spaces so "Option_A", "option a", "OPTION A" all match.
-    return " ".join(str(k).strip().lower().replace("_", " ").replace("-", " ").split())
+    # Tolerant header match: lowercase, treat _ and - as spaces, then remove ALL
+    # whitespace so "Option C (EN)", "Option C(EN)" and "option_c(en)" all match.
+    s = str(k).strip().lower().replace("_", " ").replace("-", " ")
+    return "".join(s.split())
 
 
 def _col(row, *names):
