@@ -13,7 +13,7 @@ import httpx
 import bcrypt
 import pandas as pd
 from fastapi import FastAPI, APIRouter, HTTPException, Header, UploadFile, File, Form, Depends
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
@@ -1676,11 +1676,27 @@ async def seed():
 
 @app.on_event("startup")
 async def startup():
-    await db.users.create_index("email", unique=True)
-    await db.users.create_index("user_id", unique=True)
-    await db.user_sessions.create_index("session_token", unique=True)
-    await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
-    await seed()
+    # Keep startup resilient: if the database is temporarily unreachable (e.g. the
+    # Atlas cluster is paused or the IP is not whitelisted) the app must still boot
+    # so it can auto-recover once the DB is back, instead of hard-crashing into 502.
+    try:
+        await db.users.create_index("email", unique=True)
+        await db.users.create_index("user_id", unique=True)
+        await db.user_sessions.create_index("session_token", unique=True)
+        await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
+        await seed()
+        logger.info("Startup DB init complete")
+    except Exception as e:
+        logger.error(f"Startup DB init skipped (database unreachable): {e}")
+
+
+@api.get("/health")
+async def health():
+    try:
+        await db.command("ping")
+        return {"status": "ok", "db": "connected"}
+    except Exception as e:
+        return JSONResponse(status_code=503, content={"status": "degraded", "db": "unreachable", "detail": str(e)[:200]})
 
 
 @app.on_event("shutdown")
